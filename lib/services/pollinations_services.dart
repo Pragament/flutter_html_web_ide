@@ -4,7 +4,33 @@ import '../models/api_response.dart';
 class PollinationsServices {
   static const String baseUrl = 'https://text.pollinations.ai';
 
-  static Future<PollinationsResponse> generateText(String prompt) async {
+  /// Test connection to the Pollinations API
+  static Future<bool> testConnection() async {
+    try {
+      print('Testing connection to: $baseUrl');
+
+      // Use a simple test prompt instead of hitting the base URL
+      final response = await _generateTextRaw('test');
+
+      print('Connection test response: ${response.success}');
+
+      if (response.success) {
+        print(
+          'Connection test successful! Response: ${response.text.substring(0, response.text.length > 50 ? 50 : response.text.length)}...',
+        );
+        return true;
+      } else {
+        print('Connection test failed: ${response.error}');
+        return false;
+      }
+    } catch (e) {
+      print('Connection test failed with error: $e');
+      return false;
+    }
+  }
+
+  /// Generate text with raw prompt (internal method)
+  static Future<PollinationsResponse> _generateTextRaw(String prompt) async {
     if (prompt.trim().isEmpty) {
       return PollinationsResponse.error('Prompt cannot be empty');
     }
@@ -20,7 +46,6 @@ class PollinationsServices {
           .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
-        // Pollinations API returns plain text, not JSON
         final responseText = response.body.trim();
         if (responseText.isNotEmpty) {
           return PollinationsResponse(text: responseText);
@@ -28,12 +53,61 @@ class PollinationsServices {
           return PollinationsResponse.error('Empty response from API');
         }
       } else {
-        return PollinationsResponse.error(
-          'API Error: ${response.statusCode} - ${response.reasonPhrase}',
-        );
+        final errorMsg =
+            'API Error: ${response.statusCode} - ${response.reasonPhrase}';
+        return PollinationsResponse.error(errorMsg);
       }
     } catch (e) {
-      return PollinationsResponse.error('Network Error: ${e.toString()}');
+      final errorMsg = 'Network Error: ${e.toString()}';
+      return PollinationsResponse.error(errorMsg);
+    }
+  }
+
+  static Future<PollinationsResponse> generateText(String prompt) async {
+    if (prompt.trim().isEmpty) {
+      return PollinationsResponse.error('Prompt cannot be empty');
+    }
+    try {
+      // Use _createPromptVariations to get a well-formatted prompt
+      final variations = _createPromptVariations(prompt, 1);
+      final formattedPrompt = variations.first;
+
+      final encodedPrompt = Uri.encodeComponent(formattedPrompt);
+      final url = Uri.parse('$baseUrl/$encodedPrompt');
+
+      print('Making request to: $url');
+
+      final response = await http
+          .get(
+            url,
+            headers: {'Accept': 'text/plain', 'User-Agent': 'Flutter-Web-App'},
+          )
+          .timeout(const Duration(seconds: 30));
+
+      print('Response status: ${response.statusCode}');
+      if (response.statusCode == 200) {
+        print('Response headers: ${response.headers}');
+      }
+
+      if (response.statusCode == 200) {
+        // Pollinations API returns plain text, not JSON
+        final responseText = response.body.trim();
+        print('Response text length: ${responseText.length}');
+        if (responseText.isNotEmpty) {
+          return PollinationsResponse(text: responseText);
+        } else {
+          return PollinationsResponse.error('Empty response from API');
+        }
+      } else {
+        final errorMsg =
+            'API Error: ${response.statusCode} - ${response.reasonPhrase}';
+        print(errorMsg);
+        return PollinationsResponse.error(errorMsg);
+      }
+    } catch (e) {
+      final errorMsg = 'Network Error: ${e.toString()}';
+      print('Generate text error: $errorMsg');
+      return PollinationsResponse.error(errorMsg);
     }
   }
 
@@ -52,7 +126,7 @@ class PollinationsServices {
 
     for (int i = 0; i < count; i++) {
       final variationPrompt = variations[i];
-      futures.add(generateText(variationPrompt));
+      futures.add(_generateTextRaw(variationPrompt));
 
       // Add small delay between requests to avoid overwhelming the API
       if (i < count - 1) {
@@ -79,38 +153,38 @@ class PollinationsServices {
 
     // Add the original prompt
     variations.add(
-      'Using $basePrompt, generate a Python program, Keep the code simple, under 30 lines, without functions or classes, and return only raw Python code. Do not add anything else just give me the code. do not use markdown/backticks, without any inputs taken by the user.',
+      'Using $basePrompt, generate a single, simple HTML webpage with embedded CSS and JS in <style> tags. Keep it under 50 lines. Return **only one HTML block**, with proper indentation and line breaks. Do not include explanations, options, comments, markdown, or any text before or after the code. Do not include multiple versions. Output only valid HTML code.',
     );
 
     if (count > 1) {
       // Add variations with different approaches
       variations.add(
-        'Write Python code demonstrating $basePrompt. The program should be different from standard loops, simple, under 30 lines, and no markdown or comments. Do not add anything else just give me the code,do not use markdown/backticks, without any inputs taken by the user.',
+        'Create a single, interactive webpage for $basePrompt using HTML, CSS, and JavaScript. Keep it simple, under 80 lines total, with inline CSS and JS. Return only raw HTML code with embedded <style> and <script> tags, with proper indentation and line breaks. Do not include explanations, comments, multiple versions, markdown, or any text before or after the code. Output only valid HTML.',
       );
     }
 
     if (count > 2) {
       // Add variation asking for alternative implementation
       variations.add(
-        'Generate a Python script for $basePrompt. Avoid functions or classes, do not use markdown/backticks, and keep code under 30 lines.Do not add anything else just give me the code, without any inputs taken by the user.',
+        'Build a single, modern webpage for $basePrompt using HTML5, CSS3, and vanilla JavaScript. Keep it responsive and under 100 lines total, with inline CSS in <style> and JS in <script> tags. Return only raw HTML code with proper indentation and line breaks. Do not include explanations, comments, multiple versions, markdown, or any text before or after the code. Do not use external libraries. Output only valid HTML.',
       );
     }
 
     if (count > 3) {
       // Add variation asking for optimized version
       variations.add(
-        'Provide a Python program using $basePrompt . Keep it beginner-friendly, under 30 lines, and output only plain Python code.Do not add anything else just give me the code, do not use markdown/backticks, without any inputs taken by the user.',
+        'Create a single, beginner-friendly webpage demonstrating $basePrompt using semantic HTML, basic CSS flexbox or grid, and simple JavaScript. Keep it under 80 lines total, with inline <style> and <script> tags. Return only raw, valid HTML code with proper indentation and line breaks. Do not include explanations, comments, multiple versions, markdown, or any text before or after the code. Output only working HTML.',
       );
     }
 
     if (count > 4) {
       // Add variations with more specific requests
       final additionalVariations = [
-        'Produce a Python snippet demonstrating $basePrompt in a different way from previous examples,. Keep the code short but medium-level, under 30 lines, with no comments or markdown. Do not add anything else just give me the code, without any inputs taken by the user.',
-        '$basePrompt. Include error handling.',
-        '$basePrompt. Add detailed comments.',
-        '$basePrompt. Use a different Python library or approach.',
-        '$basePrompt. Make it more beginner-friendly.',
+        'Design a single-page application for $basePrompt using HTML, CSS animations, and interactive JavaScript. Keep it visually appealing, under 120 lines total, with no external dependencies.',
+        '$basePrompt. Make it mobile-responsive with CSS media queries.',
+        '$basePrompt. Add hover effects and smooth transitions.',
+        '$basePrompt. Use CSS Grid or Flexbox for layout.',
+        '$basePrompt. Include form validation with JavaScript.',
       ];
 
       for (int i = 4; i < count && i - 4 < additionalVariations.length; i++) {
@@ -120,7 +194,9 @@ class PollinationsServices {
 
     // Fill remaining slots with the original prompt if needed
     while (variations.length < count) {
-      variations.add('$basePrompt. Version ${variations.length + 1}.');
+      variations.add(
+        '$basePrompt. Version ${variations.length + 1} - Create with HTML/CSS/JS.',
+      );
     }
 
     return variations.take(count).toList();
