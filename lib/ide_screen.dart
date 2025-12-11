@@ -33,7 +33,11 @@ class _IDEScreenState extends State<IDEScreen> {
   String _currentTheme = 'vs-dark';
   bool _preventHistoryUpdate = false;
 
-  int numberOfStudents = 4;
+  // Default to a single editor on initial load. Additional editors (up to 4)
+  // are only instantiated (Monaco + layout) after the user explicitly selects
+  // a higher count via the AppBar menu. Internal maps are still pre-populated
+  // for all potential editors so that later expansion is smooth.
+  int numberOfStudents = 1;
   final List<String> _monacoElementIds = [
     'monaco-editor-container-1',
     'monaco-editor-container-2',
@@ -112,8 +116,10 @@ class _IDEScreenState extends State<IDEScreen> {
   void initState() {
     super.initState();
 
-    // Initialize state for each editor
-    for (final id in _monacoDivIds) {
+    // Initialize state only for currently active editors (default = 1).
+    // Remaining editor slots are lazily completed when user increases count.
+    for (int i = 0; i < numberOfStudents; i++) {
+      final id = _monacoDivIds[i];
       _livePreviewEnabled[id] = true;
       _previewUpdateTimers[id] = null;
       _codeHistories[id] = CodeHistory();
@@ -254,6 +260,7 @@ document.addEventListener('DOMContentLoaded', function() {
       _showOutputInPreview[id] =
           false; // Show preview content by default (not output)
 
+      // Assign roll numbers only for active editors
       _assignRollNumbers();
     }
 
@@ -294,6 +301,15 @@ document.addEventListener('DOMContentLoaded', function() {
               _checkAndReinitializeEditors();
             }
           });
+        }
+      });
+
+      // Trigger initial layout calculation after the widget is built
+      Future.delayed(const Duration(milliseconds: 2000), () {
+        try {
+          interop.triggerLayoutRecalculation();
+        } catch (e) {
+          print('Failed to trigger initial layout recalculation: $e');
         }
       });
     });
@@ -514,6 +530,14 @@ document.addEventListener('DOMContentLoaded', function() {
     for (int i = 0; i < numberOfStudents; i++) {
       final id = _monacoDivIds[i];
       _updateLivePreview(id);
+    }
+
+    // Trigger layout recalculation after editors are initialized
+    await Future.delayed(const Duration(milliseconds: 800));
+    try {
+      await interop.triggerLayoutRecalculation();
+    } catch (e) {
+      print('Failed to trigger layout recalculation: $e');
     }
   }
 
@@ -894,6 +918,170 @@ $jsContent
     }
   }
 
+  /// Initialize all necessary states for a specific editor if they don't exist
+  void _initializeEditorStates(String editorId) {
+    // Initialize live preview if not exists
+    _livePreviewEnabled[editorId] ??= true;
+
+    // Initialize code history if not exists
+    _codeHistories[editorId] ??= CodeHistory();
+
+    // Initialize text content if not exists
+    _lastText[editorId] ??= '';
+    _editorOutputs[editorId] ??= '';
+
+    // Initialize tab state if not exists
+    _currentTabs[editorId] ??= TabType.html;
+
+    // Initialize tab contents if not exists
+    if (_tabContents[editorId] == null) {
+      _tabContents[editorId] = {
+        TabType.html: '''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Web Page</title>
+</head>
+<body>
+    <div class="container">
+        <h1 id="main-title">Welcome to HTML Web IDE!</h1>
+        <p class="description">Edit HTML, CSS, and JavaScript in the tabs above.</p>
+        <button id="change-btn" class="btn">Click me!</button>
+        <div id="output-area"></div>
+    </div>
+</body>
+</html>''',
+
+        TabType.css: '''/* CSS Styles for your webpage */
+.container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+    font-family: 'Arial', sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    color: white;
+}
+
+#main-title {
+    text-align: center;
+    color: #fff;
+    font-size: 2.5em;
+    margin-bottom: 20px;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+}
+
+.description {
+    text-align: center;
+    font-size: 1.2em;
+    margin-bottom: 30px;
+    opacity: 0.9;
+}
+
+.btn {
+    display: block;
+    margin: 20px auto;
+    padding: 12px 24px;
+    background: #ff6b6b;
+    color: white;
+    border: none;
+    border-radius: 25px;
+    font-size: 1.1em;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.btn:hover {
+    background: #ff5252;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+}
+
+#output-area {
+    margin-top: 30px;
+    padding: 20px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 10px;
+    text-align: center;
+    min-height: 50px;
+}''',
+
+        TabType.js: '''// JavaScript for interactive functionality
+console.log("🚀 HTML Web IDE is ready!");
+
+// Wait for DOM to load
+document.addEventListener('DOMContentLoaded', function() {
+    const button = document.getElementById('change-btn');
+    const title = document.getElementById('main-title');
+    const outputArea = document.getElementById('output-area');
+    
+    let clickCount = 0;
+    const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57'];
+    
+    button.addEventListener('click', function() {
+        clickCount++;
+        
+        // Change title text
+        title.textContent = `You clicked ` + clickCount + ` times! 🎉`;
+        
+        // Change button color
+        const randomColor = colors[Math.floor(Math.random() * colors.length)];
+        button.style.backgroundColor = randomColor;
+        
+        // Add message to output area
+        outputArea.innerHTML = `
+            <h3>Button clicked ` + clickCount + ` times!</h3>
+            <p>Try editing the code in different tabs to see live changes.</p>
+            <small>Last clicked: ` + new Date().toLocaleTimeString() + `</small>
+        `;
+        
+        console.log(`Button clicked ` + clickCount + ` times at ` + new Date() + ``);
+    });
+    
+    // Add some dynamic content
+    setTimeout(() => {
+        outputArea.innerHTML = '<p>✨ Ready for interaction! Click the button above.</p>';
+    }, 1000);
+});''',
+      };
+    }
+
+    // Initialize tab filenames if not exists
+    if (_tabFileNames[editorId] == null) {
+      _tabFileNames[editorId] = {
+        TabType.html: 'index.html',
+        TabType.css: 'styles.css',
+        TabType.js: 'script.js',
+      };
+    }
+
+    // Initialize undo/redo cache
+    _updateUndoRedoCache(editorId);
+
+    // Initialize autocomplete cache if not exists
+    _autocompleteEnabledCache[editorId] ??= true;
+    _isPrettifyingCache[editorId] ??= false;
+
+    // Initialize keyboard position if not exists
+    _keyboardPositions[editorId] ??= KeyboardPosition.betweenEditorOutput;
+
+    // Initialize output expansion state if not exists
+    _outputExpanded[editorId] ??= false;
+
+    // Initialize preview states if not exists
+    _previewExpanded[editorId] ??= false;
+    _showOutputInPreview[editorId] ??= false;
+  }
+
+  /// Ensure all editors have their states initialized up to numberOfStudents
+  void _ensureAllEditorStatesInitialized() {
+    for (int i = 0; i < numberOfStudents; i++) {
+      final editorId = _monacoDivIds[i];
+      _initializeEditorStates(editorId);
+    }
+  }
+
   void _regenerateRollNumber(String editorId) {
     // Remove current roll number from used set
     final currentRoll = _editorRollNumbers[editorId];
@@ -1160,6 +1348,9 @@ $jsContent
     print('Menu selection: $value for editor: $editorId');
     print('Current position: ${_keyboardPositions[editorId]}');
 
+    // Save current editor content before changing keyboard position
+    _saveCurrentEditorContent(editorId);
+
     setState(() {
       switch (value) {
         case 'above':
@@ -1178,6 +1369,96 @@ $jsContent
     });
 
     print('New position: ${_keyboardPositions[editorId]} for $editorId');
+
+    // Trigger a layout refresh and restore content after a short delay
+    _scheduleEditorLayoutRefresh();
+
+    // Restore content after the layout change
+    Future.delayed(const Duration(milliseconds: 300), () {
+      _restoreEditorContent(editorId);
+    });
+  }
+
+  // Helper method to save current editor content
+  void _saveCurrentEditorContent(String editorId) {
+    try {
+      final currentTab = _currentTabs[editorId] ?? TabType.html;
+      final currentContent = interop.getMonacoValue(editorId);
+
+      if (_tabContents[editorId] != null) {
+        _tabContents[editorId]![currentTab] = currentContent;
+        _lastText[editorId] = currentContent;
+        print('Saved content for $editorId before keyboard position change');
+      }
+    } catch (e) {
+      print('Error saving content for $editorId: $e');
+    }
+  }
+
+  // Helper method to restore editor content
+  void _restoreEditorContent(String editorId) {
+    try {
+      final currentTab = _currentTabs[editorId] ?? TabType.html;
+      final savedContent = _tabContents[editorId]?[currentTab] ?? '';
+
+      if (savedContent.isNotEmpty) {
+        interop.setMonacoValue(editorId, savedContent);
+        _lastText[editorId] = savedContent;
+        print('Restored content for $editorId after keyboard position change');
+
+        // Update live preview
+        _updateLivePreview(editorId);
+      }
+    } catch (e) {
+      print('Error restoring content for $editorId: $e');
+    }
+  }
+
+  // Schedules a microtask + short delayed resize event to prompt Monaco editors
+  // to recompute their layout after a keyboard position change alters available
+  // vertical space. Using a window resize event is a lightweight way to trigger
+  // Monaco's internal layout logic in web builds without direct access to its instance.
+  void _scheduleEditorLayoutRefresh() {
+    // Immediate microtask to allow current frame to finish setState build.
+    scheduleMicrotask(() {
+      // First attempt: dispatch a resize event.
+      try {
+        html.window.dispatchEvent(html.Event('resize'));
+      } catch (_) {}
+    });
+    // Fallback slight delay to cover animated or deferred layout changes.
+    Future.delayed(const Duration(milliseconds: 120), () {
+      try {
+        html.window.dispatchEvent(html.Event('resize'));
+        // Also trigger our custom layout recalculation
+        interop.triggerLayoutRecalculation();
+      } catch (_) {}
+    });
+
+    // Additional check to ensure Monaco editors are still responsive
+    Future.delayed(const Duration(milliseconds: 200), () {
+      _verifyEditorsAfterLayoutChange();
+    });
+  }
+
+  // Verify that Monaco editors are still responsive after layout changes
+  void _verifyEditorsAfterLayoutChange() {
+    for (final editorId in _monacoDivIds) {
+      try {
+        // Check if editor is accessible and restore content if needed
+        final currentContent = interop.getMonacoValue(editorId);
+        final currentTab = _currentTabs[editorId] ?? TabType.html;
+        final expectedContent = _tabContents[editorId]?[currentTab] ?? '';
+
+        // If content is missing but we have saved content, restore it
+        if (currentContent.isEmpty && expectedContent.isNotEmpty) {
+          print('Restoring missing content for $editorId after layout change');
+          interop.setMonacoValue(editorId, expectedContent);
+        }
+      } catch (e) {
+        print('Editor verification failed for $editorId: $e');
+      }
+    }
   }
 
   // New helper methods for expandable preview functionality
@@ -1193,6 +1474,17 @@ $jsContent
       } else {
         // Collapsing - show keyboard between editor and preview
         _keyboardPositions[editorId] = KeyboardPosition.betweenEditorOutput;
+      }
+    });
+
+    // Trigger layout recalculation after preview expansion change
+    Future.delayed(const Duration(milliseconds: 200), () {
+      try {
+        interop.triggerLayoutRecalculation();
+      } catch (e) {
+        print(
+          'Failed to trigger layout recalculation after preview toggle: $e',
+        );
       }
     });
   }
@@ -1211,7 +1503,9 @@ $jsContent
   ) {
     const double keyboardHeight =
         200.0; // Approximate height for keyboard toolbar
-    const double headerHeight = 85.0; // Account for header + tabbar
+    const double appBarHeight = 56.0; // Standard AppBar height
+    const double searchBarHeight =
+        72.0; // Approximate height for search/prompt section
 
     // Check if keyboard is visible for this editor
     bool keyboardVisible =
@@ -1221,8 +1515,20 @@ $jsContent
     bool previewExpanded =
         _previewExpanded[_monacoDivIds[editorIndex]] ?? false;
 
+    // Start with total screen height and subtract fixed elements
     double availableHeight = constraints.maxHeight;
-    double usedHeight = headerHeight + (keyboardVisible ? keyboardHeight : 0);
+    double usedHeight = appBarHeight + searchBarHeight;
+
+    // Only subtract keyboard height if keyboard is actually visible
+    if (keyboardVisible) {
+      usedHeight += keyboardHeight;
+    }
+
+    // Add specific overflow corrections based on editor mode
+    // Single editor mode needs 26px more correction, multi-editor needs 12px more
+    double overflowCorrection = numberOfStudents == 1 ? 26.0 : 12.0;
+    usedHeight += overflowCorrection;
+
     double remainingHeight = availableHeight - usedHeight;
 
     // Ensure minimum heights
@@ -1236,10 +1542,10 @@ $jsContent
       editorHeight = remainingHeight * 0.4; // 40% for editor
       previewHeight = remainingHeight * 0.6 - 10; // 60% for expanded preview
     } else {
-      // Normal layout
-      editorHeight = remainingHeight * 0.7; // 70% of remaining height
+      // Normal layout: 80/20 split as requested
+      editorHeight = remainingHeight * 0.8; // 80% for editor
       previewHeight =
-          remainingHeight * 0.3 - 10; // 30% of remaining height minus padding
+          remainingHeight * 0.2 - 10; // 20% for preview minus padding
     }
 
     return {
@@ -1270,8 +1576,7 @@ $jsContent
   Widget _buildKeyboard(int editorIndex) {
     final currentTab = _currentTabs[_monacoDivIds[editorIndex]] ?? TabType.html;
     final currentTabName = _getTabNameForTabType(currentTab);
-
-    return KeyboardToolbar(
+    final toolbar = KeyboardToolbar(
       key: ValueKey('keyboard-${_monacoDivIds[editorIndex]}'),
       onKeyPress: (key) => _handleKeyPress(key, _monacoDivIds[editorIndex]),
       onBackspace: () => _handleBackspace(_monacoDivIds[editorIndex]),
@@ -1293,6 +1598,29 @@ $jsContent
       onMenuSelection: _handleMenuSelection,
       editorId: _monacoDivIds[editorIndex],
       currentTab: currentTabName,
+    );
+
+    // Apply single-editor specific layout constraints (center + max width)
+    return _applySingleEditorKeyboardLayout(toolbar, editorIndex);
+  }
+
+  /// Wraps the keyboard toolbar in a centered, max-width container ONLY when
+  /// a single editor is active. For multi-editor modes it returns the toolbar
+  /// unchanged so each editor retains its own full-width keyboard.
+  Widget _applySingleEditorKeyboardLayout(Widget child, int editorIndex) {
+    if (numberOfStudents != 1) return child; // Multi-editor: unchanged
+    if (editorIndex != 0) {
+      return child; // Safety; only first editor in single mode
+    }
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 900),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+          child: child,
+        ),
+      ),
     );
   }
 
@@ -1509,8 +1837,28 @@ $jsContent
       }
       print('Connection test passed');
 
-      // Generate code for the selected editor only
-      final response = await PollinationsServices.generateText(prompt);
+      // Generate code with enhanced prompt for separate HTML, CSS, and JS
+      final enhancedPrompt = '''$prompt
+
+Please provide the code in THREE separate sections:
+1. HTML code (structure only, no <style> or <script> tags)
+2. CSS code (styles only, no <style> tags)
+3. JavaScript code (logic only, no <script> tags)
+
+Format your response with clear markers like:
+```html
+[HTML code here]
+```
+```css
+[CSS code here]
+```
+```js
+[JavaScript code here]
+```
+
+Or use clear section headers like "HTML:", "CSS:", "JavaScript:".''';
+
+      final response = await PollinationsServices.generateText(enhancedPrompt);
 
       print('Response received - Success: ${response.success}');
       if (!response.success) {
@@ -1520,25 +1868,51 @@ $jsContent
       if (response.success && response.text.isNotEmpty) {
         print('Generated text length: ${response.text.length}');
 
-        // Set the generated code in the selected editor
+        // Parse the response to extract HTML, CSS, and JS
+        final parsedCode = _parseAIResponse(response.text);
+
         final editorId = _monacoDivIds[_selectedEditorIndex];
+
+        print('Setting code in editor: $editorId');
+        print('HTML length: ${parsedCode['html']?.length ?? 0}');
+        print('CSS length: ${parsedCode['css']?.length ?? 0}');
+        print('JS length: ${parsedCode['js']?.length ?? 0}');
+
+        // Update all three tabs with the parsed content
+        if (parsedCode['html'] != null && parsedCode['html']!.isNotEmpty) {
+          _tabContents[editorId]![TabType.html] = parsedCode['html']!;
+        }
+        if (parsedCode['css'] != null && parsedCode['css']!.isNotEmpty) {
+          _tabContents[editorId]![TabType.css] = parsedCode['css']!;
+        }
+        if (parsedCode['js'] != null && parsedCode['js']!.isNotEmpty) {
+          _tabContents[editorId]![TabType.js] = parsedCode['js']!;
+        }
+
+        // Update the currently visible tab in Monaco editor
         final currentTab = _currentTabs[editorId] ?? TabType.html;
+        final currentContent = _tabContents[editorId]![currentTab] ?? '';
 
-        print('Setting text in editor: $editorId, tab: $currentTab');
-
-        interop.setMonacoValue(editorId, response.text);
-        _lastText[editorId] = response.text;
+        interop.setMonacoValue(editorId, currentContent);
+        _lastText[editorId] = currentContent;
         _codeHistories[editorId]?.clear();
-        _codeHistories[editorId]?.addState(response.text);
+        _codeHistories[editorId]?.addState(currentContent);
 
-        // Update tab content and filename to reflect the prompt
-        _tabContents[editorId]![currentTab] = response.text;
-        final extension = _getFileExtensionForTab(currentTab);
-        final fileName =
-            '${_sanitizeFilename(prompt)}_editor_${_selectedEditorIndex + 1}$extension';
-        setState(() => _tabFileNames[editorId]![currentTab] = fileName);
+        // Update filenames for all tabs
+        final sanitizedName = _sanitizeFilename(prompt);
+        setState(() {
+          _tabFileNames[editorId]![TabType.html] =
+              '${sanitizedName}_editor_${_selectedEditorIndex + 1}.html';
+          _tabFileNames[editorId]![TabType.css] =
+              '${sanitizedName}_editor_${_selectedEditorIndex + 1}.css';
+          _tabFileNames[editorId]![TabType.js] =
+              '${sanitizedName}_editor_${_selectedEditorIndex + 1}.js';
+        });
 
-        // Save to history with single response
+        // Refresh the live preview to show all three files working together
+        _refreshPreviewContent(editorId);
+
+        // Save to history with the full response
         await PromptHistoryService.savePrompt(
           prompt: prompt,
           responses: [response.text],
@@ -1554,7 +1928,7 @@ $jsContent
 
         // Show success feedback
         _showSuccessMessage(
-          'Code generated and loaded into Editor ${_selectedEditorIndex + 1}!',
+          'Code generated for all three tabs (HTML, CSS, JS) in Editor ${_selectedEditorIndex + 1}!',
         );
       } else {
         String errorMsg;
@@ -1601,6 +1975,231 @@ $jsContent
         _isGenerating = false;
       });
     }
+  }
+
+  /// Parse AI response to extract HTML, CSS, and JavaScript code blocks
+  /// Ensures clean separation: HTML tab gets structure only (no <style>/<script>),
+  /// CSS tab gets all styles, JS tab gets all scripts
+  Map<String, String> _parseAIResponse(String response) {
+    final result = <String, String>{'html': '', 'css': '', 'js': ''};
+
+    try {
+      // First, try to extract fenced code blocks (```html, ```css, ```js, ```javascript)
+      final htmlMatch = RegExp(
+        r'```html\s*([\s\S]*?)```',
+        caseSensitive: false,
+      ).firstMatch(response);
+      final cssMatch = RegExp(
+        r'```css\s*([\s\S]*?)```',
+        caseSensitive: false,
+      ).firstMatch(response);
+      final jsMatch = RegExp(
+        r'```(?:js|javascript)\s*([\s\S]*?)```',
+        caseSensitive: false,
+      ).firstMatch(response);
+
+      if (htmlMatch != null || cssMatch != null || jsMatch != null) {
+        // Found fenced code blocks - extract and clean them
+        String htmlCode = htmlMatch?.group(1)?.trim() ?? '';
+        String cssCode = cssMatch?.group(1)?.trim() ?? '';
+        String jsCode = jsMatch?.group(1)?.trim() ?? '';
+
+        // If HTML contains embedded <style> or <script>, extract them
+        if (htmlCode.isNotEmpty) {
+          final extracted = _extractAndCleanHTML(htmlCode);
+          result['html'] = extracted['html']!;
+          // Merge extracted CSS and JS with explicitly provided ones
+          result['css'] = _mergeCSSCode(cssCode, extracted['css']!);
+          result['js'] = _mergeJSCode(jsCode, extracted['js']!);
+        } else {
+          result['html'] = htmlCode;
+          result['css'] = cssCode;
+          result['js'] = jsCode;
+        }
+
+        print(
+          'Parsed fenced code blocks - HTML: ${result['html']!.isNotEmpty}, CSS: ${result['css']!.isNotEmpty}, JS: ${result['js']!.isNotEmpty}',
+        );
+
+        // If we got at least one valid block, return
+        if (result['html']!.isNotEmpty ||
+            result['css']!.isNotEmpty ||
+            result['js']!.isNotEmpty) {
+          return result;
+        }
+      }
+
+      // Second, try to extract from section headers (HTML:, CSS:, JavaScript:)
+      final htmlHeaderMatch = RegExp(
+        r'HTML:\s*([\s\S]*?)(?=CSS:|JavaScript:|JS:|$)',
+        caseSensitive: false,
+      ).firstMatch(response);
+      final cssHeaderMatch = RegExp(
+        r'CSS:\s*([\s\S]*?)(?=HTML:|JavaScript:|JS:|$)',
+        caseSensitive: false,
+      ).firstMatch(response);
+      final jsHeaderMatch = RegExp(
+        r'(?:JavaScript|JS):\s*([\s\S]*?)(?=HTML:|CSS:|$)',
+        caseSensitive: false,
+      ).firstMatch(response);
+
+      if (htmlHeaderMatch != null ||
+          cssHeaderMatch != null ||
+          jsHeaderMatch != null) {
+        String htmlCode = htmlHeaderMatch?.group(1)?.trim() ?? '';
+        String cssCode = cssHeaderMatch?.group(1)?.trim() ?? '';
+        String jsCode = jsHeaderMatch?.group(1)?.trim() ?? '';
+
+        // Clean HTML if it contains embedded styles/scripts
+        if (htmlCode.isNotEmpty) {
+          final extracted = _extractAndCleanHTML(htmlCode);
+          result['html'] = extracted['html']!;
+          result['css'] = _mergeCSSCode(cssCode, extracted['css']!);
+          result['js'] = _mergeJSCode(jsCode, extracted['js']!);
+        } else {
+          result['html'] = htmlCode;
+          result['css'] = cssCode;
+          result['js'] = jsCode;
+        }
+
+        print(
+          'Parsed section headers - HTML: ${result['html']!.isNotEmpty}, CSS: ${result['css']!.isNotEmpty}, JS: ${result['js']!.isNotEmpty}',
+        );
+
+        if (result['html']!.isNotEmpty ||
+            result['css']!.isNotEmpty ||
+            result['js']!.isNotEmpty) {
+          return result;
+        }
+      }
+
+      // Third, try to extract from a complete HTML document with embedded <style> and <script>
+      final completeHTMLMatch = RegExp(
+        r'<!DOCTYPE[\s\S]*?</html>|<html[\s\S]*?</html>',
+        caseSensitive: false,
+      ).firstMatch(response);
+
+      if (completeHTMLMatch != null) {
+        final fullHTML = completeHTMLMatch.group(0)!;
+        final extracted = _extractAndCleanHTML(fullHTML);
+        result['html'] = extracted['html']!;
+        result['css'] = extracted['css']!;
+        result['js'] = extracted['js']!;
+
+        print(
+          'Parsed complete HTML - HTML: ${result['html']!.isNotEmpty}, CSS: ${result['css']!.isNotEmpty}, JS: ${result['js']!.isNotEmpty}',
+        );
+
+        return result;
+      }
+
+      // Fourth, fallback: if response looks like plain HTML, extract and clean it
+      if (response.contains('<') && response.contains('>')) {
+        final extracted = _extractAndCleanHTML(response.trim());
+        result['html'] = extracted['html']!;
+        result['css'] = extracted['css']!;
+        result['js'] = extracted['js']!;
+        print('Fallback: extracting from HTML-like content');
+        return result;
+      }
+
+      // Last resort: put everything in HTML
+      result['html'] = response.trim();
+      print('Last resort: putting entire response in HTML tab');
+    } catch (e) {
+      print('Error parsing AI response: $e');
+      // On error, put entire response in HTML tab
+      result['html'] = response.trim();
+    }
+
+    return result;
+  }
+
+  /// Extract CSS and JS from HTML and return clean HTML structure only
+  Map<String, String> _extractAndCleanHTML(String html) {
+    final result = <String, String>{'html': '', 'css': '', 'js': ''};
+
+    // Extract ALL CSS from <style> tags (supports multiple style tags)
+    final cssBlocks = <String>[];
+    final styleMatches = RegExp(
+      r'<style[^>]*>([\s\S]*?)</style>',
+      caseSensitive: false,
+    ).allMatches(html);
+    for (final match in styleMatches) {
+      final cssContent = match.group(1)?.trim() ?? '';
+      if (cssContent.isNotEmpty) {
+        cssBlocks.add(cssContent);
+      }
+    }
+    result['css'] = cssBlocks.join('\n\n');
+
+    // Extract ALL JavaScript from <script> tags (supports multiple script tags)
+    final jsBlocks = <String>[];
+    final scriptMatches = RegExp(
+      r'<script[^>]*>([\s\S]*?)</script>',
+      caseSensitive: false,
+    ).allMatches(html);
+    for (final match in scriptMatches) {
+      final jsContent = match.group(1)?.trim() ?? '';
+      if (jsContent.isNotEmpty) {
+        jsBlocks.add(jsContent);
+      }
+    }
+    result['js'] = jsBlocks.join('\n\n');
+
+    // Remove ALL <style> and <script> tags from HTML
+    String cleanHTML = html
+        .replaceAll(
+          RegExp(r'<style[^>]*>[\s\S]*?</style>', caseSensitive: false),
+          '',
+        )
+        .replaceAll(
+          RegExp(r'<script[^>]*>[\s\S]*?</script>', caseSensitive: false),
+          '',
+        );
+
+    // Extract just the body content if present (cleaner HTML structure)
+    final bodyMatch = RegExp(
+      r'<body[^>]*>([\s\S]*?)</body>',
+      caseSensitive: false,
+    ).firstMatch(cleanHTML);
+
+    if (bodyMatch != null) {
+      result['html'] = bodyMatch.group(1)!.trim();
+    } else {
+      // Remove DOCTYPE, html, head tags if present to get just the content
+      cleanHTML =
+          cleanHTML
+              .replaceAll(RegExp(r'<!DOCTYPE[^>]*>', caseSensitive: false), '')
+              .replaceAll(RegExp(r'<html[^>]*>', caseSensitive: false), '')
+              .replaceAll(RegExp(r'</html>', caseSensitive: false), '')
+              .replaceAll(
+                RegExp(r'<head[^>]*>[\s\S]*?</head>', caseSensitive: false),
+                '',
+              )
+              .replaceAll(RegExp(r'<body[^>]*>', caseSensitive: false), '')
+              .replaceAll(RegExp(r'</body>', caseSensitive: false), '')
+              .trim();
+      result['html'] = cleanHTML;
+    }
+
+    return result;
+  }
+
+  /// Merge CSS code, preferring explicitly provided CSS over extracted CSS
+  String _mergeCSSCode(String explicitCSS, String extractedCSS) {
+    if (explicitCSS.isNotEmpty && extractedCSS.isNotEmpty) {
+      return '$explicitCSS\n\n$extractedCSS';
+    }
+    return explicitCSS.isNotEmpty ? explicitCSS : extractedCSS;
+  }
+
+  /// Merge JS code, preferring explicitly provided JS over extracted JS
+  String _mergeJSCode(String explicitJS, String extractedJS) {
+    if (explicitJS.isNotEmpty && extractedJS.isNotEmpty) {
+      return '$explicitJS\n\n$extractedJS';
+    }
+    return explicitJS.isNotEmpty ? explicitJS : extractedJS;
   }
 
   // Helper method to sanitize filename
@@ -1876,6 +2475,18 @@ $jsContent
   @override
   Widget build(BuildContext context) {
     print('Building IDE with $numberOfStudents editors'); // Debug print
+
+    // Trigger layout recalculation after each build to ensure platform views are properly sized
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(milliseconds: 200)).then((_) {
+        try {
+          interop.triggerLayoutRecalculation();
+        } catch (e) {
+          print('Failed to trigger layout recalculation in build: $e');
+        }
+      });
+    });
+
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -1884,8 +2495,10 @@ $jsContent
         backgroundColor: Colors.grey[900],
         actions: [
           PopupMenuButton<int>(
+            tooltip: 'Select number of editors',
+            position: PopupMenuPosition.under,
             onSelected: (value) async {
-              print('Switching from $numberOfStudents to $value editors');
+              print('Editor count changed to $value');
 
               // Save current state before changing
               await _saveCurrentEditorStates();
@@ -1894,12 +2507,6 @@ $jsContent
               setState(() {
                 _monacoInitialized = false;
                 _isInitializingMonaco = true;
-              });
-
-              // Immediately cleanup existing editors to prevent visual glitch
-              await _cleanupEditors();
-
-              setState(() {
                 numberOfStudents = value;
                 // Reset selected editor index if it's out of range
                 if (_selectedEditorIndex >= numberOfStudents) {
@@ -1909,6 +2516,13 @@ $jsContent
                 _editorsNeedReinitialization = true;
               });
 
+              print('numberOfStudents updated to: $numberOfStudents');
+
+              // Immediately cleanup existing editors to prevent visual glitch
+              await _cleanupEditors();
+
+              // Ensure all editor states are initialized for the new count
+              _ensureAllEditorStatesInitialized();
               _assignRollNumbers();
 
               // Wait for widget rebuild to complete, then reinitialize editors
@@ -1918,6 +2532,16 @@ $jsContent
                   print(
                     'Editor switch completed: $numberOfStudents editors active',
                   );
+
+                  // Trigger layout recalculation after editor count change
+                  await Future.delayed(const Duration(milliseconds: 300));
+                  try {
+                    await interop.triggerLayoutRecalculation();
+                  } catch (e) {
+                    print(
+                      'Failed to trigger layout recalculation after editor switch: $e',
+                    );
+                  }
                 });
               });
             },
@@ -1927,21 +2551,48 @@ $jsContent
                     value: 0,
                     enabled: false,
                     child: Text(
-                      'Number of Students',
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                      'Select Number of Editors',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
                     ),
                   ),
                   const PopupMenuDivider(),
                   for (int i = 1; i <= 4; i++)
                     PopupMenuItem<int>(
                       value: i,
-                      child: Row(
-                        children: [
-                          if (numberOfStudents == i)
-                            const Icon(Icons.check, size: 16),
-                          if (numberOfStudents == i) const SizedBox(width: 8),
-                          Text('$i Student${i == 1 ? '' : 's'}'),
-                        ],
+                      child: SizedBox(
+                        width: 200,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.max,
+                          children: [
+                            if (numberOfStudents == i) ...[
+                              const Icon(
+                                Icons.check,
+                                size: 18,
+                                color: Colors.blue,
+                              ),
+                              const SizedBox(width: 8),
+                            ] else ...[
+                              const SizedBox(width: 26),
+                            ],
+                            Text(
+                              'Editor ${i}',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color:
+                                    numberOfStudents == i
+                                        ? Colors.blue
+                                        : Colors.black87,
+                                fontWeight:
+                                    numberOfStudents == i
+                                        ? FontWeight.w600
+                                        : FontWeight.normal,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                 ],
@@ -2036,209 +2687,410 @@ $jsContent
                       child: SizedBox(
                         height: constraints.maxHeight,
                         child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            for (int i = 0; i < numberOfStudents; i++)
-                              Container(
-                                width: responsiveWidth,
-                                height: constraints.maxHeight,
-                                decoration: BoxDecoration(
-                                  border: Border.all(
-                                    color: Colors.blue.withOpacity(0.5),
-                                    width: 2,
-                                  ), // More visible border
-                                  borderRadius: BorderRadius.circular(8),
-                                  color:
-                                      Colors
-                                          .grey[850], // Background color to make containers visible
-                                ),
-                                margin: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                ),
-                                child: Column(
-                                  key: ValueKey(
-                                    'editor-column-${_monacoDivIds[i]}',
-                                  ),
-                                  children: [
-                                    //Roll Number Header
-                                    Container(
-                                      height: 40, // Make header taller
-                                      width: double.infinity,
-                                      decoration: BoxDecoration(
-                                        color: Colors.blue[700],
-                                        border: const Border(
-                                          bottom: BorderSide(
-                                            color: Colors.grey,
+                            // Always create all 4 containers in the widget tree to keep DOM structure stable
+                            for (int i = 0; i < 4; i++)
+                              if (i < numberOfStudents)
+                                Container(
+                                  width: responsiveWidth,
+                                  decoration:
+                                      numberOfStudents > 1
+                                          ? BoxDecoration(
+                                            border: Border.all(
+                                              color: Colors.blue.withOpacity(
+                                                0.5,
+                                              ),
+                                              width: 2,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
+                                            color: Colors.grey[850],
+                                          )
+                                          : null,
+                                  margin:
+                                      numberOfStudents > 1
+                                          ? const EdgeInsets.symmetric(
+                                            horizontal: 4,
+                                          )
+                                          : null,
+                                  child: Column(
+                                    key: ValueKey(
+                                      'editor-column-${_monacoDivIds[i]}',
+                                    ),
+                                    children: [
+                                      //Roll Number Header with Editor Count Dropdown
+                                      Container(
+                                        height: 40, // Make header taller
+                                        width: double.infinity,
+                                        decoration: BoxDecoration(
+                                          color: Colors.blue[700],
+                                          border: const Border(
+                                            bottom: BorderSide(
+                                              color: Colors.grey,
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                      child: Center(
                                         child: Row(
-                                          mainAxisSize: MainAxisSize.min,
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
                                           children: [
-                                            Text(
-                                              'Editor ${i + 1} - Roll No: ${_editorRollNumbers[_monacoDivIds[i]] ?? 'N/A'}',
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 16, // Larger font
+                                            // Left side: Editor count dropdown
+                                            PopupMenuButton<int>(
+                                              tooltip:
+                                                  'Select number of editors',
+                                              position: PopupMenuPosition.under,
+                                              offset: const Offset(0, 5),
+                                              constraints: const BoxConstraints(
+                                                minWidth: 220,
+                                                maxWidth: 220,
+                                              ),
+                                              onSelected: (value) async {
+                                                print(
+                                                  'Editor count changed from $numberOfStudents to $value',
+                                                );
+
+                                                // Save current state before changing
+                                                await _saveCurrentEditorStates();
+
+                                                // Immediately show loading state and cleanup editors to prevent flashing
+                                                setState(() {
+                                                  _monacoInitialized = false;
+                                                  _isInitializingMonaco = true;
+                                                  numberOfStudents = value;
+                                                  // Reset selected editor index if it's out of range
+                                                  if (_selectedEditorIndex >=
+                                                      numberOfStudents) {
+                                                    _selectedEditorIndex = 0;
+                                                  }
+                                                  // Mark that editors need reinitialization after widget rebuild
+                                                  _editorsNeedReinitialization =
+                                                      true;
+                                                });
+
+                                                print(
+                                                  'numberOfStudents updated to: $numberOfStudents',
+                                                );
+
+                                                // Immediately cleanup existing editors to prevent visual glitch
+                                                await _cleanupEditors();
+
+                                                // Ensure all editor states are initialized for the new count
+                                                _ensureAllEditorStatesInitialized();
+                                                _assignRollNumbers();
+
+                                                // Wait for widget rebuild to complete, then reinitialize editors
+                                                WidgetsBinding.instance.addPostFrameCallback((
+                                                  _,
+                                                ) {
+                                                  Future.delayed(
+                                                    const Duration(
+                                                      milliseconds: 500,
+                                                    ),
+                                                    () async {
+                                                      await _reinitializeEditors();
+                                                      print(
+                                                        'Editor switch completed: $numberOfStudents editors active',
+                                                      );
+
+                                                      // Trigger layout recalculation after editor count change
+                                                      await Future.delayed(
+                                                        const Duration(
+                                                          milliseconds: 300,
+                                                        ),
+                                                      );
+                                                      try {
+                                                        await interop
+                                                            .triggerLayoutRecalculation();
+                                                      } catch (e) {
+                                                        print(
+                                                          'Failed to trigger layout recalculation after editor switch: $e',
+                                                        );
+                                                      }
+                                                    },
+                                                  );
+                                                });
+                                              },
+                                              itemBuilder:
+                                                  (context) => [
+                                                    const PopupMenuItem<int>(
+                                                      value: 0,
+                                                      enabled: false,
+                                                      child: Text(
+                                                        'Select Number of Editors',
+                                                        style: TextStyle(
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                          fontSize: 14,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    const PopupMenuDivider(),
+                                                    for (int e = 1; e <= 4; e++)
+                                                      PopupMenuItem<int>(
+                                                        value: e,
+                                                        child: Row(
+                                                          mainAxisSize:
+                                                              MainAxisSize.max,
+                                                          children: [
+                                                            if (numberOfStudents ==
+                                                                e) ...[
+                                                              const Icon(
+                                                                Icons.check,
+                                                                size: 18,
+                                                                color:
+                                                                    Colors.blue,
+                                                              ),
+                                                              const SizedBox(
+                                                                width: 8,
+                                                              ),
+                                                            ] else ...[
+                                                              const SizedBox(
+                                                                width: 26,
+                                                              ),
+                                                            ],
+                                                            Text(
+                                                              'Editor $e',
+                                                              style: TextStyle(
+                                                                fontSize: 14,
+                                                                color:
+                                                                    numberOfStudents ==
+                                                                            e
+                                                                        ? Colors
+                                                                            .blue
+                                                                        : Colors
+                                                                            .black87,
+                                                                fontWeight:
+                                                                    numberOfStudents ==
+                                                                            e
+                                                                        ? FontWeight
+                                                                            .w600
+                                                                        : FontWeight
+                                                                            .normal,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                  ],
+                                              child: Center(
+                                                child: Padding(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 8.0,
+                                                      ),
+                                                  child: Row(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    mainAxisAlignment:
+                                                        MainAxisAlignment
+                                                            .center,
+                                                    children: [
+                                                      Text(
+                                                        'Editor ${i + 1}',
+                                                        style: const TextStyle(
+                                                          color: Colors.white,
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                          fontSize: 16,
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 4),
+                                                      const Icon(
+                                                        Icons.arrow_drop_down,
+                                                        color: Colors.white,
+                                                        size: 18,
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
                                               ),
                                             ),
-                                            const SizedBox(width: 8),
-                                            // Refresh button right beside the roll number
-                                            GestureDetector(
-                                              onTap:
-                                                  () => _regenerateRollNumber(
-                                                    _monacoDivIds[i],
+                                            // Right side: Roll number and refresh button
+                                            Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 8.0,
                                                   ),
-                                              child: Container(
-                                                padding: const EdgeInsets.all(
-                                                  2,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.white
-                                                      .withOpacity(0.2),
-                                                  borderRadius:
-                                                      BorderRadius.circular(4),
-                                                ),
-                                                child: const Icon(
-                                                  Icons.refresh,
-                                                  color: Colors.white,
-                                                  size: 14,
-                                                ),
+                                              child: Row(
+                                                children: [
+                                                  Text(
+                                                    'Roll No: ${_editorRollNumbers[_monacoDivIds[i]] ?? 'N/A'}',
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      fontSize: 14,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  // Refresh button right beside the roll number
+                                                  GestureDetector(
+                                                    onTap:
+                                                        () =>
+                                                            _regenerateRollNumber(
+                                                              _monacoDivIds[i],
+                                                            ),
+                                                    child: Container(
+                                                      padding:
+                                                          const EdgeInsets.all(
+                                                            2,
+                                                          ),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.white
+                                                            .withOpacity(0.2),
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              4,
+                                                            ),
+                                                      ),
+                                                      child: const Icon(
+                                                        Icons.refresh,
+                                                        color: Colors.white,
+                                                        size: 14,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                             ),
                                           ],
                                         ),
                                       ),
-                                    ),
-                                    //TabBar
-                                    Container(
-                                      height: 45,
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey[800],
-                                        border: const Border(
-                                          bottom: BorderSide(
-                                            color: Colors.grey,
+                                      //TabBar
+                                      Container(
+                                        height: 45,
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey[800],
+                                          border: const Border(
+                                            bottom: BorderSide(
+                                              color: Colors.grey,
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                      child: Row(
-                                        children:
-                                            TabType.values.map((tab) {
-                                              final isActive =
-                                                  _currentTabs[_monacoDivIds[i]] ==
-                                                  tab;
-                                              return Expanded(
-                                                child: GestureDetector(
-                                                  onTap:
-                                                      () => _switchTab(
-                                                        _monacoDivIds[i],
-                                                        tab,
-                                                      ),
-                                                  child: Container(
-                                                    decoration: BoxDecoration(
-                                                      color:
-                                                          isActive
-                                                              ? Colors.blue[600]
-                                                              : Colors
-                                                                  .transparent,
-                                                      border: Border(
-                                                        right: BorderSide(
-                                                          color:
-                                                              Colors.grey[600]!,
+                                        child: Row(
+                                          children:
+                                              TabType.values.map((tab) {
+                                                final isActive =
+                                                    _currentTabs[_monacoDivIds[i]] ==
+                                                    tab;
+                                                return Expanded(
+                                                  child: GestureDetector(
+                                                    onTap:
+                                                        () => _switchTab(
+                                                          _monacoDivIds[i],
+                                                          tab,
+                                                        ),
+                                                    child: Container(
+                                                      decoration: BoxDecoration(
+                                                        color:
+                                                            isActive
+                                                                ? Colors
+                                                                    .blue[600]
+                                                                : Colors
+                                                                    .transparent,
+                                                        border: Border(
+                                                          right: BorderSide(
+                                                            color:
+                                                                Colors
+                                                                    .grey[600]!,
+                                                          ),
                                                         ),
                                                       ),
-                                                    ),
-                                                    child: Center(
-                                                      child: Text(
-                                                        tab.name.toUpperCase(),
-                                                        style: TextStyle(
-                                                          color:
-                                                              isActive
-                                                                  ? Colors.white
-                                                                  : Colors
-                                                                      .grey[300],
-                                                          fontWeight:
-                                                              isActive
-                                                                  ? FontWeight
-                                                                      .bold
-                                                                  : FontWeight
-                                                                      .normal,
-                                                          fontSize: 12,
+                                                      child: Center(
+                                                        child: Text(
+                                                          tab.name
+                                                              .toUpperCase(),
+                                                          style: TextStyle(
+                                                            color:
+                                                                isActive
+                                                                    ? Colors
+                                                                        .white
+                                                                    : Colors
+                                                                        .grey[300],
+                                                            fontWeight:
+                                                                isActive
+                                                                    ? FontWeight
+                                                                        .bold
+                                                                    : FontWeight
+                                                                        .normal,
+                                                            fontSize: 12,
+                                                          ),
                                                         ),
                                                       ),
                                                     ),
                                                   ),
-                                                ),
-                                              );
-                                            }).toList(),
+                                                );
+                                              }).toList(),
+                                        ),
                                       ),
-                                    ),
+                                      // Keyboard position handling (unified for single & multi editor modes):
+                                      // Reserve three potential slots (above / between / below). Each slot keeps a placeholder
+                                      // when inactive to preserve the index ordering of the HtmlElementView (Monaco) widget in the
+                                      // Column, preventing platform view teardown & blank editor issues. Exactly one slot renders
+                                      // the keyboard at any time per editor.
+                                      Container(
+                                        key: ValueKey(
+                                          'keyboard-above-${_monacoDivIds[i]}',
+                                        ),
+                                        child:
+                                            (_keyboardPositions[_monacoDivIds[i]] ==
+                                                    KeyboardPosition
+                                                        .aboveEditor)
+                                                ? _buildKeyboard(i)
+                                                : const SizedBox.shrink(),
+                                      ),
 
-                                    // Show keyboard above editor if selected
-                                    if (_keyboardPositions[_monacoDivIds[i]] ==
-                                        KeyboardPosition.aboveEditor)
-                                      _buildKeyboard(i),
-
-                                    // Editor section
-                                    Builder(
-                                      builder: (context) {
-                                        final heights =
-                                            _calculateDynamicHeights(
-                                              constraints,
-                                              i,
-                                            );
-                                        return SizedBox(
+                                      // Editor area - unified layout for single and multi-editor modes
+                                      // Both modes now use Expanded to fill available space without overflow
+                                      Expanded(
+                                        flex: 7,
+                                        child: Stack(
                                           key: ValueKey(
-                                            'editor-expanded-${_monacoElementIds[i]}',
+                                            'editor-stack-${_monacoElementIds[i]}',
                                           ),
-                                          height: heights['editor']!,
-                                          child: Stack(
-                                            key: ValueKey(
-                                              'editor-stack-${_monacoElementIds[i]}',
-                                            ),
-                                            children: [
-                                              ClipRect(
-                                                child: HtmlElementView(
-                                                  key: ValueKey(
-                                                    _monacoElementIds[i],
-                                                  ),
-                                                  viewType:
-                                                      _monacoElementIds[i],
+                                          children: [
+                                            ClipRect(
+                                              child: HtmlElementView(
+                                                key: ValueKey(
+                                                  _monacoElementIds[i],
                                                 ),
+                                                viewType: _monacoElementIds[i],
                                               ),
-                                              if (!_monacoInitialized)
-                                                const Center(
-                                                  child:
-                                                      CircularProgressIndicator(),
-                                                ),
-                                            ],
-                                          ),
-                                        );
-                                      },
-                                    ),
+                                            ),
+                                            if (!_monacoInitialized)
+                                              const Center(
+                                                child:
+                                                    CircularProgressIndicator(),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
 
-                                    // Show keyboard between editor and preview if selected and preview not expanded
-                                    if (_keyboardPositions[_monacoDivIds[i]] ==
-                                            KeyboardPosition
-                                                .betweenEditorOutput &&
-                                        _previewExpanded[_monacoDivIds[i]] !=
-                                            true)
-                                      _buildKeyboard(i),
+                                      // Slot for keyboard between editor & output (only shows when selected and preview not expanded)
+                                      Container(
+                                        key: ValueKey(
+                                          'keyboard-between-${_monacoDivIds[i]}',
+                                        ),
+                                        child:
+                                            (_keyboardPositions[_monacoDivIds[i]] ==
+                                                        KeyboardPosition
+                                                            .betweenEditorOutput &&
+                                                    _previewExpanded[_monacoDivIds[i]] !=
+                                                        true)
+                                                ? _buildKeyboard(i)
+                                                : const SizedBox.shrink(),
+                                      ),
 
-                                    const Divider(
-                                      height: 1,
-                                      color: Colors.grey,
-                                    ),
-                                    // Unified expandable preview/output section
-                                    Builder(
-                                      builder: (context) {
-                                        return Expanded(
-                                          key: ValueKey(
-                                            'preview-expanded-${_monacoElementIds[i]}',
-                                          ),
-                                          child: Container(
+                                      const Divider(
+                                        height: 1,
+                                        color: Colors.grey,
+                                      ),
+                                      // Unified expandable preview/output section (flex aware in multi-editor mode)
+                                      Builder(
+                                        builder: (context) {
+                                          final previewChild = Container(
                                             key: ValueKey(
                                               'preview-container-${_monacoElementIds[i]}',
                                             ),
@@ -2462,10 +3314,10 @@ $jsContent
                                                                 });
                                                               },
 
-                                                              thumbColor: MaterialStateProperty.resolveWith(
+                                                              thumbColor: WidgetStateProperty.resolveWith(
                                                                 (states) =>
                                                                     states.contains(
-                                                                          MaterialState
+                                                                          WidgetState
                                                                               .selected,
                                                                         )
                                                                         ? Colors
@@ -2473,10 +3325,10 @@ $jsContent
                                                                         : Colors
                                                                             .grey[400],
                                                               ),
-                                                              trackColor: MaterialStateProperty.resolveWith(
+                                                              trackColor: WidgetStateProperty.resolveWith(
                                                                 (states) =>
                                                                     states.contains(
-                                                                          MaterialState
+                                                                          WidgetState
                                                                               .selected,
                                                                         )
                                                                         ? Colors
@@ -2549,13 +3401,33 @@ $jsContent
                                                 ),
                                               ],
                                             ),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  ],
+                                          );
+
+                                          // Unified preview layout for both single and multi-editor modes
+                                          return Expanded(
+                                            flex: 3,
+                                            key: ValueKey(
+                                              'preview-expanded-${_monacoElementIds[i]}',
+                                            ),
+                                            child: previewChild,
+                                          );
+                                        },
+                                      ),
+                                      // Slot for keyboard below output / preview
+                                      Container(
+                                        key: ValueKey(
+                                          'keyboard-below-${_monacoDivIds[i]}',
+                                        ),
+                                        child:
+                                            (_keyboardPositions[_monacoDivIds[i]] ==
+                                                    KeyboardPosition
+                                                        .belowOutput)
+                                                ? _buildKeyboard(i)
+                                                : const SizedBox.shrink(),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
                           ],
                         ),
                       ),
