@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'login_controller.dart';
+import 'register_screen.dart';
+import '../home_screen.dart';
 
 class LoginScreen extends StatelessWidget {
   const LoginScreen({super.key});
@@ -10,6 +12,7 @@ class LoginScreen extends StatelessWidget {
     final controller = context.watch<LoginController>();
     final emailCtrl = TextEditingController();
     final passwordCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
 
     return Scaffold(
       backgroundColor: const Color(0xFF1E1E1E),
@@ -26,7 +29,7 @@ class LoginScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                'Flutter Web IDE',
+                'HTML Web IDE',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 22,
@@ -38,8 +41,8 @@ class LoginScreen extends StatelessWidget {
 
               _inputField(
                 controller: emailCtrl,
-                label: 'Email or Username',
-                hint: 'email@example.com or username',
+                label: 'Username',
+                hint: 'Username',
               ),
               const SizedBox(height: 12),
 
@@ -47,6 +50,12 @@ class LoginScreen extends StatelessWidget {
                 controller: passwordCtrl,
                 label: 'Password',
                 obscure: true,
+              ),
+              const SizedBox(height: 12),
+
+              _inputField(
+                controller: phoneCtrl,
+                label: 'Last 6 digits of phone number',
               ),
 
               const SizedBox(height: 16),
@@ -70,11 +79,19 @@ class LoginScreen extends StatelessWidget {
                         ? null
                         : () async {
                           final success = await controller.login(
-                            emailCtrl.text,
-                            passwordCtrl.text,
+                            username: emailCtrl.text.trim(),
+                            password: passwordCtrl.text,
+                            phoneLast6: phoneCtrl.text.trim(),
                           );
 
-                          // Do nothing — AuthGate will auto-redirect
+                          if (success && context.mounted) {
+                            Navigator.pushReplacement(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const HomeScreen(),
+                              ),
+                            );
+                          }
                         },
                 child:
                     controller.isLoading
@@ -87,6 +104,40 @@ class LoginScreen extends StatelessWidget {
                           ),
                         )
                         : const Text('Login'),
+              ),
+              const SizedBox(height: 16),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text("Don't have an account? "),
+                  Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const RegisterScreen(),
+                          ),
+                        );
+                      },
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 2,
+                        ),
+                        child: Text(
+                          'Register',
+                          style: TextStyle(
+                            color: Colors.blue,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
