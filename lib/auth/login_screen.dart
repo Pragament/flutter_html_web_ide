@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'login_controller.dart';
 import 'register_screen.dart';
+import 'forgot_screen.dart';
 import '../home_screen.dart';
 
 class LoginScreen extends StatelessWidget {
@@ -57,8 +58,22 @@ class LoginScreen extends StatelessWidget {
                 controller: phoneCtrl,
                 label: 'Last 6 digits of phone number',
               ),
+              const SizedBox(height: 12),
 
-              const SizedBox(height: 16),
+              TextButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const ForgotScreen()),
+                  );
+                },
+                child: const Text(
+                  'Forgot username / password?',
+                  style: TextStyle(color: Colors.blue),
+                ),
+              ),
+
+              const SizedBox(height: 5),
 
               if (controller.error != null)
                 Text(
