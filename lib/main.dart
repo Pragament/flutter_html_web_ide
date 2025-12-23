@@ -38,11 +38,6 @@ class FlutterHtmlWebIDE extends StatelessWidget {
         ),
         home: const AuthGate(),
         debugShowCheckedModeBanner: false,
-        //initialRoute: '/login',
-        /*routes: {
-          '/login': (context) => const LoginScreen(),
-          '/home': (context) => const HomeScreen(),
-        },*/
       ),
     );
   }

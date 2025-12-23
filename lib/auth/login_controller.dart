@@ -1,32 +1,44 @@
 import 'package:flutter/foundation.dart';
-import 'auth_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../services/encryption_service.dart';
 
 class LoginController extends ChangeNotifier {
   bool isLoading = false;
   String? error;
 
-  Future<bool> login(String identifier, String password) async {
+  Future<bool> login({
+    required String username,
+    required String password,
+    required String phoneLast6,
+  }) async {
     isLoading = true;
     error = null;
     notifyListeners();
 
     try {
-      String emailToUse = identifier.trim();
-
-      // If input does NOT look like email, treat as username
-      if (!identifier.contains('@')) {
-        final resolvedEmail = await AuthService.getEmailFromUsername(
-          identifier.trim(),
-        );
-
-        if (resolvedEmail == null) {
-          throw Exception('Username not found');
-        }
-
-        emailToUse = resolvedEmail;
+      if (phoneLast6.length != 6) {
+        throw Exception('Phone last 6 digits required');
       }
 
-      await AuthService.login(email: emailToUse, password: password);
+
+      final doc =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(username.trim())
+              .get();
+
+      if (!doc.exists) {
+        throw Exception('Invalid credentials');
+      }
+
+      final storedEncrypted = doc.data()!['encryptedPassword'] as String;
+
+      final encryptedInput =
+          EncryptionService.encryptPassword(password, phoneLast6.trim()).base64;
+      
+      if (storedEncrypted != encryptedInput) {
+        throw Exception('Invalid credentials');
+      }
 
       isLoading = false;
       notifyListeners();
