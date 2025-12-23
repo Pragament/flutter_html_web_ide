@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_html_web_ide/auth/login_screen.dart';
 import 'auth/auth_service.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -16,7 +17,10 @@ class HomeScreen extends StatelessWidget {
             icon: const Icon(Icons.logout),
             onPressed: () async {
               await AuthService.logout();
-              // No need to navigate manually; AuthGate will handle it
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const LoginScreen()),
+              );
             },
           ),
         ],
