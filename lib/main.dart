@@ -1,16 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_html_web_ide/auth/login_screen.dart';
-import 'package:flutter_html_web_ide/ide_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
+
 import 'firebase_options.dart';
-import 'auth/auth_service.dart';
+import 'auth/login_screen.dart';
 import 'auth/login_controller.dart';
 import 'auth/register_controller.dart';
 import 'auth/forgot_credentials_screen.dart';
-import 'home_screen.dart';
-import 'auth/auth_gate.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,13 +27,13 @@ class FlutterHtmlWebIDE extends StatelessWidget {
       ],
       child: MaterialApp(
         title: 'HTML Web IDE',
+        debugShowCheckedModeBanner: false,
         theme: ThemeData(
           primarySwatch: Colors.blue,
           useMaterial3: true,
           brightness: Brightness.dark,
         ),
-        home: const AuthGate(),
-        debugShowCheckedModeBanner: false,
+        home: const LoginScreen(),
       ),
     );
   }

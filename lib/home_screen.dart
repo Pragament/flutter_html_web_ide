@@ -1,36 +1,32 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_html_web_ide/auth/login_screen.dart';
-import 'auth/auth_service.dart';
+import 'auth/login_screen.dart';
+import 'ide_screen.dart';
+import 'services/session_service.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final user = AuthService.currentUser;
-
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Home'),
+        title: const Text('HTML Web IDE'),
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await AuthService.logout();
-              Navigator.push(
+            tooltip: 'Logout',
+            onPressed: () {
+              SessionService.logout();
+              Navigator.pushAndRemoveUntil(
                 context,
                 MaterialPageRoute(builder: (_) => const LoginScreen()),
+                (_) => false,
               );
             },
           ),
         ],
       ),
-      body: Center(
-        child: Text(
-          'Welcome ${user?.email ?? 'User'}',
-          style: const TextStyle(fontSize: 20),
-        ),
-      ),
+      body: const IDEScreen(),
     );
   }
 }
