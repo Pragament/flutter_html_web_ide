@@ -11,6 +11,8 @@ import '../services/pollinations_services.dart';
 import '../services/prompt_history_service.dart';
 import '../widgets/prompt_history_widget.dart';
 import '../models/prompt_history.dart';
+import '../services/code_storage_service.dart';
+import '../services/session_service.dart';
 
 enum KeyboardPosition { aboveEditor, betweenEditorOutput, belowOutput }
 
@@ -1256,7 +1258,72 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   void _saveCodeToFile([String? editorId]) {
-    _showSaveDialog(editorId);
+    _showSaveOptionsDialog(editorId);
+  }
+
+  // Stub for cloud save functionality
+  Future<void> _saveToCloud([String? editorId]) async {
+    final username = SessionService.currentUsername;
+    if (username == null) {
+      _showSnackBar('Please login again');
+      return;
+    }
+
+    final id = editorId ?? _monacoDivIds[0];
+
+    final html = _tabContents[id]?[TabType.html] ?? '';
+    final css = _tabContents[id]?[TabType.css] ?? '';
+    final js = _tabContents[id]?[TabType.js] ?? '';
+
+    final projectName =
+        _tabFileNames[id]?[TabType.html]?.split('.').first ?? 'my_project';
+
+    try {
+      await CodeStorageService.saveProject(
+        username: username,
+        projectName: projectName,
+        html: html,
+        css: css,
+        js: js,
+      );
+
+      _showSnackBar('Saved to Cloud');
+    } catch (e) {
+      _showSnackBar('Cloud save failed');
+    }
+  }
+
+  // Dialog to choose between saving to PC or Cloud
+  void _showSaveOptionsDialog([String? editorId]) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Save Code'),
+          backgroundColor: Colors.grey[850],
+          content: const Text(
+            'Where do you want to save your code?',
+            style: TextStyle(color: Colors.white),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _showSaveDialog(editorId); // existing PC save dialog
+              },
+              child: const Text('Save to PC'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _saveToCloud(editorId); // cloud save stub
+              },
+              child: const Text('Save to Cloud'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _showSaveDialog([String? editorId]) {
