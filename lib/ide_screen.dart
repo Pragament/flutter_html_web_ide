@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_html_web_ide/widgets/keyboard_toolbar.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:html' as html;
 import 'dart:ui_web' as ui_web;
 import 'interop.dart' as interop;
@@ -34,6 +35,8 @@ class _IDEScreenState extends State<IDEScreen> {
   final Map<String, CodeHistory> _codeHistories = {};
   String _currentTheme = 'vs-dark';
   bool _preventHistoryUpdate = false;
+  String? _currentProjectId;
+  String? _currentProjectName;
 
   // Default to a single editor on initial load. Additional editors (up to 4)
   // are only instantiated (Monaco + layout) after the user explicitly selects
@@ -1261,9 +1264,72 @@ document.addEventListener('DOMContentLoaded', function() {
     _showSaveOptionsDialog(editorId);
   }
 
+  void _newProject() {
+    final editorId = _monacoDivIds[0]; // primary editor
+
+    setState(() {
+      _currentProjectId = null;
+      _currentProjectName = null;
+
+      _tabContents[editorId]![TabType.html] = '';
+      _tabContents[editorId]![TabType.css] = '';
+      _tabContents[editorId]![TabType.js] = '';
+    });
+
+    // Clear Monaco editor (current tab only)
+    interop.setMonacoValue(editorId, '');
+
+    _showSnackBar('New project created');
+  }
+
+  //to ask for project name if not set
+  void _promptForProjectNameAndSave(String? editorId) {
+    final TextEditingController controller = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Project Name'),
+          content: TextField(
+            controller: controller,
+            decoration: const InputDecoration(hintText: 'Enter project name'),
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final name = controller.text.trim();
+                if (name.isEmpty) return;
+
+                setState(() {
+                  _currentProjectName = name;
+                });
+
+                Navigator.of(context).pop();
+                _saveToCloud(editorId);
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   // Stub for cloud save functionality
   Future<void> _saveToCloud([String? editorId]) async {
+    if (_currentProjectName == null) {
+      _promptForProjectNameAndSave(editorId);
+      return;
+    }
+
     final username = SessionService.currentUsername;
+
     if (username == null) {
       _showSnackBar('Please login again');
       return;
@@ -1276,7 +1342,9 @@ document.addEventListener('DOMContentLoaded', function() {
     final js = _tabContents[id]?[TabType.js] ?? '';
 
     final projectName =
-        _tabFileNames[id]?[TabType.html]?.split('.').first ?? 'my_project';
+        _currentProjectName ??
+        _tabFileNames[id]?[TabType.html]?.split('.').first ??
+        'my_project';
 
     try {
       await CodeStorageService.saveProject(
@@ -2709,6 +2777,24 @@ $jsContent
               }
             },
           ),
+
+          Builder(
+            builder:
+                (context) => IconButton(
+                  icon: const Icon(Icons.folder_open),
+                  tooltip: 'Saved Projects',
+                  onPressed: () {
+                    Scaffold.of(context).openEndDrawer();
+                  },
+                ),
+          ),
+
+          IconButton(
+            icon: const Icon(Icons.note_add),
+            tooltip: 'New Project',
+            onPressed: _newProject,
+          ),
+
           IconButton(
             icon: const Icon(Icons.save),
             tooltip: 'Save File',
@@ -2716,6 +2802,105 @@ $jsContent
           ),
         ],
       ),
+      endDrawer: Drawer(
+        backgroundColor: Colors.grey[900],
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Saved Projects',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: StreamBuilder(
+                  stream:
+                      FirebaseFirestore.instance
+                          .collection('users')
+                          .doc(SessionService.currentUsername)
+                          .collection('files')
+                          .orderBy('updatedAt', descending: true)
+                          .snapshots(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+
+                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                      return const Center(
+                        child: Text(
+                          'No saved projects',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      );
+                    }
+
+                    final docs = snapshot.data!.docs;
+
+                    return ListView.builder(
+                      itemCount: docs.length,
+                      itemBuilder: (context, index) {
+                        final doc = docs[index];
+                        final data = doc.data() as Map<String, dynamic>;
+
+                        return ListTile(
+                          leading: const Icon(
+                            Icons.description,
+                            color: Colors.white,
+                          ),
+                          title: Text(
+                            data['name'] ?? 'Unnamed Project',
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                          subtitle: const Text(
+                            'HTML / CSS / JS',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                          onTap: () {
+                            final editorId =
+                                _monacoDivIds[0]; // load into first editor
+
+                            setState(() {
+                              _currentProjectId = doc.id;
+                              _currentProjectName = data['name'];
+
+                              _tabContents[editorId]![TabType.html] =
+                                  data['html'] ?? '';
+                              _tabContents[editorId]![TabType.css] =
+                                  data['css'] ?? '';
+                              _tabContents[editorId]![TabType.js] =
+                                  data['js'] ?? '';
+                            });
+
+                            final currentTab =
+                                _currentTabs[editorId] ?? TabType.html;
+                            interop.setMonacoValue(
+                              editorId,
+                              _tabContents[editorId]![currentTab] ?? '',
+                            );
+
+                            _showSnackBar('Project loaded successfully');
+
+                            Navigator.pop(context);
+                          },
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+
       floatingActionButton: FloatingActionButton(
         onPressed: _showHistory,
         backgroundColor: Colors.blue,
