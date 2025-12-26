@@ -4,9 +4,12 @@ import 'login_controller.dart';
 import 'register_screen.dart';
 import 'forgot_screen.dart';
 import '../home_screen.dart';
+import '../services/session_service.dart';
 
 class LoginScreen extends StatelessWidget {
-  const LoginScreen({super.key});
+  final bool openedFromIDE;
+
+  const LoginScreen({super.key, this.openedFromIDE = false});
 
   @override
   Widget build(BuildContext context) {
@@ -84,6 +87,7 @@ class LoginScreen extends StatelessWidget {
 
               const SizedBox(height: 16),
 
+              // Login Button
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF0E639C),
@@ -100,12 +104,16 @@ class LoginScreen extends StatelessWidget {
                           );
 
                           if (success && context.mounted) {
-                            Navigator.pushReplacement(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const HomeScreen(),
-                              ),
-                            );
+                            if (openedFromIDE) {
+                              Navigator.pop(context); // return to IDE
+                            } else {
+                              Navigator.pushReplacement(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const HomeScreen(),
+                                ),
+                              );
+                            }
                           }
                         },
                 child:
@@ -120,8 +128,27 @@ class LoginScreen extends StatelessWidget {
                         )
                         : const Text('Login'),
               ),
+
+              const SizedBox(height: 10),
+
+              // Guest Login Button
+              TextButton(
+                onPressed: () {
+                  SessionService.loginAsGuest();
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(builder: (_) => const HomeScreen()),
+                  );
+                },
+                child: const Text(
+                  'Skip login (Continue as Guest)',
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ),
+
               const SizedBox(height: 16),
 
+              // Register Link
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
