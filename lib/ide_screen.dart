@@ -14,6 +14,7 @@ import '../widgets/prompt_history_widget.dart';
 import '../models/prompt_history.dart';
 import '../services/code_storage_service.dart';
 import '../services/session_service.dart';
+import 'auth/login_screen.dart';
 
 enum KeyboardPosition { aboveEditor, betweenEditorOutput, belowOutput }
 
@@ -35,6 +36,8 @@ class _IDEScreenState extends State<IDEScreen> {
   final Map<String, CodeHistory> _codeHistories = {};
   String _currentTheme = 'vs-dark';
   bool _preventHistoryUpdate = false;
+  bool _retrySaveAfterLogin = false;
+  int _drawerRefreshKey = 0;
   String? _currentProjectId;
   String? _currentProjectName;
 
@@ -330,6 +333,16 @@ document.addEventListener('DOMContentLoaded', function() {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    //(auto-retry save after login)
+    if (_retrySaveAfterLogin && SessionService.currentUsername != null) {
+      _retrySaveAfterLogin = false;
+
+      setState(() {
+        _drawerRefreshKey++; //  rebind StreamBuilder with correct user
+      });
+
+      Future.microtask(() => _saveToCloud());
+    }
     // Don't check if we're already initializing
     if (!_isInitializingMonaco) {
       // Check if we need to reinitialize editors when coming back to the screen
@@ -1331,7 +1344,8 @@ document.addEventListener('DOMContentLoaded', function() {
     final username = SessionService.currentUsername;
 
     if (username == null) {
-      _showSnackBar('Please login again');
+      _retrySaveAfterLogin = true;
+      _promptLoginRequired();
       return;
     }
 
@@ -1356,6 +1370,10 @@ document.addEventListener('DOMContentLoaded', function() {
       );
 
       _showSnackBar('Saved to Cloud');
+
+      setState(() {
+        _drawerRefreshKey++; //  refresh to include new project
+      });
     } catch (e) {
       _showSnackBar('Cloud save failed');
     }
@@ -1391,6 +1409,40 @@ document.addEventListener('DOMContentLoaded', function() {
           ],
         );
       },
+    );
+  }
+
+  // Prompt user to login if not authenticated
+  void _promptLoginRequired() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Login Required'),
+            content: const Text(
+              'Please login to save your project to the cloud.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      fullscreenDialog: true,
+                      builder: (_) => const LoginScreen(openedFromIDE: true),
+                    ),
+                  );
+                },
+                child: const Text('Login'),
+              ),
+            ],
+          ),
     );
   }
 
@@ -2803,6 +2855,7 @@ $jsContent
         ],
       ),
       endDrawer: Drawer(
+        key: ValueKey(_drawerRefreshKey),
         backgroundColor: Colors.grey[900],
         child: SafeArea(
           child: Column(
@@ -2820,81 +2873,96 @@ $jsContent
                 ),
               ),
               Expanded(
-                child: StreamBuilder(
-                  stream:
-                      FirebaseFirestore.instance
-                          .collection('users')
-                          .doc(SessionService.currentUsername)
-                          .collection('files')
-                          .orderBy('updatedAt', descending: true)
-                          .snapshots(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-
-                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                      return const Center(
-                        child: Text(
-                          'No saved projects',
-                          style: TextStyle(color: Colors.white70),
-                        ),
-                      );
-                    }
-
-                    final docs = snapshot.data!.docs;
-
-                    return ListView.builder(
-                      itemCount: docs.length,
-                      itemBuilder: (context, index) {
-                        final doc = docs[index];
-                        final data = doc.data() as Map<String, dynamic>;
-
-                        return ListTile(
-                          leading: const Icon(
-                            Icons.description,
-                            color: Colors.white,
-                          ),
-                          title: Text(
-                            data['name'] ?? 'Unnamed Project',
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                          subtitle: const Text(
-                            'HTML / CSS / JS',
+                child:
+                    SessionService.currentUsername == null
+                        ? const Center(
+                          child: Text(
+                            'Login required to view saved projects',
                             style: TextStyle(color: Colors.white70),
                           ),
-                          onTap: () {
-                            final editorId =
-                                _monacoDivIds[0]; // load into first editor
+                        )
+                        : StreamBuilder(
+                          stream:
+                              FirebaseFirestore.instance
+                                  .collection('users')
+                                  .doc(SessionService.currentUsername)
+                                  .collection('files')
+                                  .orderBy('updatedAt', descending: true)
+                                  .snapshots(),
 
-                            setState(() {
-                              _currentProjectId = doc.id;
-                              _currentProjectName = data['name'];
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState ==
+                                ConnectionState.waiting) {
+                              return const Center(
+                                child: CircularProgressIndicator(),
+                              );
+                            }
 
-                              _tabContents[editorId]![TabType.html] =
-                                  data['html'] ?? '';
-                              _tabContents[editorId]![TabType.css] =
-                                  data['css'] ?? '';
-                              _tabContents[editorId]![TabType.js] =
-                                  data['js'] ?? '';
-                            });
+                            if (!snapshot.hasData ||
+                                snapshot.data!.docs.isEmpty) {
+                              return const Center(
+                                child: Text(
+                                  'No saved projects',
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                              );
+                            }
 
-                            final currentTab =
-                                _currentTabs[editorId] ?? TabType.html;
-                            interop.setMonacoValue(
-                              editorId,
-                              _tabContents[editorId]![currentTab] ?? '',
+                            final docs = snapshot.data!.docs;
+
+                            return ListView.builder(
+                              itemCount: docs.length,
+                              itemBuilder: (context, index) {
+                                final doc = docs[index];
+                                final data = doc.data() as Map<String, dynamic>;
+
+                                return ListTile(
+                                  leading: const Icon(
+                                    Icons.description,
+                                    color: Colors.white,
+                                  ),
+                                  title: Text(
+                                    data['name'] ?? 'Unnamed Project',
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+                                  subtitle: const Text(
+                                    'HTML / CSS / JS',
+                                    style: TextStyle(color: Colors.white70),
+                                  ),
+                                  onTap: () {
+                                    final editorId =
+                                        _monacoDivIds[0]; // load into first editor
+
+                                    setState(() {
+                                      _currentProjectId = doc.id;
+                                      _currentProjectName = data['name'];
+
+                                      _tabContents[editorId]![TabType.html] =
+                                          data['html'] ?? '';
+                                      _tabContents[editorId]![TabType.css] =
+                                          data['css'] ?? '';
+                                      _tabContents[editorId]![TabType.js] =
+                                          data['js'] ?? '';
+                                    });
+
+                                    final currentTab =
+                                        _currentTabs[editorId] ?? TabType.html;
+                                    interop.setMonacoValue(
+                                      editorId,
+                                      _tabContents[editorId]![currentTab] ?? '',
+                                    );
+
+                                    _showSnackBar(
+                                      'Project loaded successfully',
+                                    );
+
+                                    Navigator.pop(context);
+                                  },
+                                );
+                              },
                             );
-
-                            _showSnackBar('Project loaded successfully');
-
-                            Navigator.pop(context);
                           },
-                        );
-                      },
-                    );
-                  },
-                ),
+                        ),
               ),
             ],
           ),
