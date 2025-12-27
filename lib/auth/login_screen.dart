@@ -104,9 +104,11 @@ class LoginScreen extends StatelessWidget {
                           );
 
                           if (success && context.mounted) {
-                            if (openedFromIDE) {
-                              Navigator.pop(context); // return to IDE
+                            if (Navigator.canPop(context)) {
+                              // Login opened from IDE (top-bar)
+                              Navigator.pop(context);
                             } else {
+                              // Initial login / save-to-cloud login
                               Navigator.pushReplacement(
                                 context,
                                 MaterialPageRoute(
@@ -135,10 +137,15 @@ class LoginScreen extends StatelessWidget {
               TextButton(
                 onPressed: () {
                   SessionService.loginAsGuest();
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(builder: (_) => const HomeScreen()),
-                  );
+
+                  if (Navigator.canPop(context)) {
+                    Navigator.pop(context);
+                  } else {
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(builder: (_) => const HomeScreen()),
+                    );
+                  }
                 },
                 child: const Text(
                   'Skip login (Continue as Guest)',
