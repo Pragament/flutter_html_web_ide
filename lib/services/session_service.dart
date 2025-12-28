@@ -17,6 +17,9 @@ class SessionService {
     _isGuest = false;
   }
 
-  static bool get isLoggedIn => currentUsername != null;
+  // ✅ TRUE only for real users
+  static bool get isAuthenticated => currentUsername != null;
+
+  // optional helpers
   static bool get isGuest => _isGuest;
 }

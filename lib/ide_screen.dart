@@ -21,7 +21,8 @@ enum KeyboardPosition { aboveEditor, betweenEditorOutput, belowOutput }
 enum TabType { html, css, js }
 
 class IDEScreen extends StatefulWidget {
-  const IDEScreen({super.key});
+  final VoidCallback onLoginSuccess;
+  const IDEScreen({super.key, required this.onLoginSuccess});
 
   @override
   State<IDEScreen> createState() => _IDEScreenState();
@@ -1385,7 +1386,7 @@ document.addEventListener('DOMContentLoaded', function() {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Save Code'),
+          title: const Text('Save Code', style: TextStyle(color: Colors.white)),
           backgroundColor: Colors.grey[850],
           content: const Text(
             'Where do you want to save your code?',
@@ -1397,14 +1398,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 Navigator.pop(context);
                 _showSaveDialog(editorId); // existing PC save dialog
               },
-              child: const Text('Save to PC'),
+              child: const Text(
+                'Save to PC',
+                style: TextStyle(color: Colors.white),
+              ),
             ),
             ElevatedButton(
               onPressed: () {
                 Navigator.pop(context);
                 _saveToCloud(editorId); // cloud save stub
               },
-              child: const Text('Save to Cloud'),
+              child: const Text(
+                'Save to Cloud',
+                style: TextStyle(color: Colors.white),
+              ),
             ),
           ],
         );
@@ -1413,15 +1420,20 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   // Prompt user to login if not authenticated
+  // Prompt user to login if not authenticated
   void _promptLoginRequired() {
     showDialog(
       context: context,
       barrierDismissible: false,
       builder:
           (context) => AlertDialog(
-            title: const Text('Login Required'),
+            title: const Text(
+              'Login Required',
+              style: TextStyle(color: Colors.white),
+            ),
             content: const Text(
               'Please login to save your project to the cloud.',
+              style: TextStyle(color: Colors.white),
             ),
             actions: [
               TextButton(
@@ -1429,15 +1441,22 @@ document.addEventListener('DOMContentLoaded', function() {
                 child: const Text('Cancel'),
               ),
               ElevatedButton(
-                onPressed: () {
+                onPressed: () async {
                   Navigator.pop(context);
-                  Navigator.push(
+
+                  //  WAIT for login result
+                  final result = await Navigator.push<bool>(
                     context,
                     MaterialPageRoute(
                       fullscreenDialog: true,
                       builder: (_) => const LoginScreen(openedFromIDE: true),
                     ),
                   );
+
+                  //  NOTIFY HomeScreen after successful login
+                  if (result == true) {
+                    widget.onLoginSuccess();
+                  }
                 },
                 child: const Text('Login'),
               ),

@@ -106,7 +106,7 @@ class LoginScreen extends StatelessWidget {
                           if (success && context.mounted) {
                             if (Navigator.canPop(context)) {
                               // Login opened from IDE (top-bar)
-                              Navigator.pop(context);
+                              Navigator.pop(context, true);
                             } else {
                               // Initial login / save-to-cloud login
                               Navigator.pushReplacement(
@@ -139,7 +139,7 @@ class LoginScreen extends StatelessWidget {
                   SessionService.loginAsGuest();
 
                   if (Navigator.canPop(context)) {
-                    Navigator.pop(context);
+                    Navigator.pop(context, true);
                   } else {
                     Navigator.pushReplacement(
                       context,
