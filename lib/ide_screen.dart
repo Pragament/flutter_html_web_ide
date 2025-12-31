@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_html_web_ide/widgets/keyboard_toolbar.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:html' as html;
 import 'dart:ui_web' as ui_web;
 import 'interop.dart' as interop;
@@ -11,13 +12,17 @@ import '../services/pollinations_services.dart';
 import '../services/prompt_history_service.dart';
 import '../widgets/prompt_history_widget.dart';
 import '../models/prompt_history.dart';
+import '../services/code_storage_service.dart';
+import '../services/session_service.dart';
+import 'auth/login_screen.dart';
 
 enum KeyboardPosition { aboveEditor, betweenEditorOutput, belowOutput }
 
 enum TabType { html, css, js }
 
 class IDEScreen extends StatefulWidget {
-  const IDEScreen({super.key});
+  final VoidCallback onLoginSuccess;
+  const IDEScreen({super.key, required this.onLoginSuccess});
 
   @override
   State<IDEScreen> createState() => _IDEScreenState();
@@ -32,6 +37,10 @@ class _IDEScreenState extends State<IDEScreen> {
   final Map<String, CodeHistory> _codeHistories = {};
   String _currentTheme = 'vs-dark';
   bool _preventHistoryUpdate = false;
+  bool _retrySaveAfterLogin = false;
+  int _drawerRefreshKey = 0;
+  String? _currentProjectId;
+  String? _currentProjectName;
 
   // Default to a single editor on initial load. Additional editors (up to 4)
   // are only instantiated (Monaco + layout) after the user explicitly selects
@@ -325,6 +334,16 @@ document.addEventListener('DOMContentLoaded', function() {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    //(auto-retry save after login)
+    if (_retrySaveAfterLogin && SessionService.currentUsername != null) {
+      _retrySaveAfterLogin = false;
+
+      setState(() {
+        _drawerRefreshKey++; //  rebind StreamBuilder with correct user
+      });
+
+      Future.microtask(() => _saveToCloud());
+    }
     // Don't check if we're already initializing
     if (!_isInitializingMonaco) {
       // Check if we need to reinitialize editors when coming back to the screen
@@ -1256,7 +1275,194 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   void _saveCodeToFile([String? editorId]) {
-    _showSaveDialog(editorId);
+    _showSaveOptionsDialog(editorId);
+  }
+
+  void _newProject() {
+    final editorId = _monacoDivIds[0]; // primary editor
+
+    setState(() {
+      _currentProjectId = null;
+      _currentProjectName = null;
+
+      _tabContents[editorId]![TabType.html] = '';
+      _tabContents[editorId]![TabType.css] = '';
+      _tabContents[editorId]![TabType.js] = '';
+    });
+
+    // Clear Monaco editor (current tab only)
+    interop.setMonacoValue(editorId, '');
+
+    _showSnackBar('New project created');
+  }
+
+  //to ask for project name if not set
+  void _promptForProjectNameAndSave(String? editorId) {
+    final TextEditingController controller = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Project Name'),
+          content: TextField(
+            controller: controller,
+            decoration: const InputDecoration(hintText: 'Enter project name'),
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final name = controller.text.trim();
+                if (name.isEmpty) return;
+
+                setState(() {
+                  _currentProjectName = name;
+                });
+
+                Navigator.of(context).pop();
+                _saveToCloud(editorId);
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // Stub for cloud save functionality
+  Future<void> _saveToCloud([String? editorId]) async {
+    if (_currentProjectName == null) {
+      _promptForProjectNameAndSave(editorId);
+      return;
+    }
+
+    final username = SessionService.currentUsername;
+
+    if (username == null) {
+      _retrySaveAfterLogin = true;
+      _promptLoginRequired();
+      return;
+    }
+
+    final id = editorId ?? _monacoDivIds[0];
+
+    final html = _tabContents[id]?[TabType.html] ?? '';
+    final css = _tabContents[id]?[TabType.css] ?? '';
+    final js = _tabContents[id]?[TabType.js] ?? '';
+
+    final projectName =
+        _currentProjectName ??
+        _tabFileNames[id]?[TabType.html]?.split('.').first ??
+        'my_project';
+
+    try {
+      await CodeStorageService.saveProject(
+        username: username,
+        projectName: projectName,
+        html: html,
+        css: css,
+        js: js,
+      );
+
+      _showSnackBar('Saved to Cloud');
+
+      setState(() {
+        _drawerRefreshKey++; //  refresh to include new project
+      });
+    } catch (e) {
+      _showSnackBar('Cloud save failed');
+    }
+  }
+
+  // Dialog to choose between saving to PC or Cloud
+  void _showSaveOptionsDialog([String? editorId]) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Save Code', style: TextStyle(color: Colors.white)),
+          backgroundColor: Colors.grey[850],
+          content: const Text(
+            'Where do you want to save your code?',
+            style: TextStyle(color: Colors.white),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _showSaveDialog(editorId); // existing PC save dialog
+              },
+              child: const Text(
+                'Save to PC',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _saveToCloud(editorId); // cloud save stub
+              },
+              child: const Text(
+                'Save to Cloud',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // Prompt user to login if not authenticated
+  // Prompt user to login if not authenticated
+  void _promptLoginRequired() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder:
+          (context) => AlertDialog(
+            title: const Text(
+              'Login Required',
+              style: TextStyle(color: Colors.white),
+            ),
+            content: const Text(
+              'Please login to save your project to the cloud.',
+              style: TextStyle(color: Colors.white),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  Navigator.pop(context);
+
+                  //  WAIT for login result
+                  final result = await Navigator.push<bool>(
+                    context,
+                    MaterialPageRoute(
+                      fullscreenDialog: true,
+                      builder: (_) => const LoginScreen(openedFromIDE: true),
+                    ),
+                  );
+
+                  //  NOTIFY HomeScreen after successful login
+                  if (result == true) {
+                    widget.onLoginSuccess();
+                  }
+                },
+                child: const Text('Login'),
+              ),
+            ],
+          ),
+    );
   }
 
   void _showSaveDialog([String? editorId]) {
@@ -2642,6 +2848,24 @@ $jsContent
               }
             },
           ),
+
+          Builder(
+            builder:
+                (context) => IconButton(
+                  icon: const Icon(Icons.folder_open),
+                  tooltip: 'Saved Projects',
+                  onPressed: () {
+                    Scaffold.of(context).openEndDrawer();
+                  },
+                ),
+          ),
+
+          IconButton(
+            icon: const Icon(Icons.note_add),
+            tooltip: 'New Project',
+            onPressed: _newProject,
+          ),
+
           IconButton(
             icon: const Icon(Icons.save),
             tooltip: 'Save File',
@@ -2649,6 +2873,121 @@ $jsContent
           ),
         ],
       ),
+      endDrawer: Drawer(
+        key: ValueKey(_drawerRefreshKey),
+        backgroundColor: Colors.grey[900],
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Saved Projects',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              Expanded(
+                child:
+                    SessionService.currentUsername == null
+                        ? const Center(
+                          child: Text(
+                            'Login required to view saved projects',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        )
+                        : StreamBuilder(
+                          stream:
+                              FirebaseFirestore.instance
+                                  .collection('users')
+                                  .doc(SessionService.currentUsername)
+                                  .collection('files')
+                                  .orderBy('updatedAt', descending: true)
+                                  .snapshots(),
+
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState ==
+                                ConnectionState.waiting) {
+                              return const Center(
+                                child: CircularProgressIndicator(),
+                              );
+                            }
+
+                            if (!snapshot.hasData ||
+                                snapshot.data!.docs.isEmpty) {
+                              return const Center(
+                                child: Text(
+                                  'No saved projects',
+                                  style: TextStyle(color: Colors.white70),
+                                ),
+                              );
+                            }
+
+                            final docs = snapshot.data!.docs;
+
+                            return ListView.builder(
+                              itemCount: docs.length,
+                              itemBuilder: (context, index) {
+                                final doc = docs[index];
+                                final data = doc.data() as Map<String, dynamic>;
+
+                                return ListTile(
+                                  leading: const Icon(
+                                    Icons.description,
+                                    color: Colors.white,
+                                  ),
+                                  title: Text(
+                                    data['name'] ?? 'Unnamed Project',
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+                                  subtitle: const Text(
+                                    'HTML / CSS / JS',
+                                    style: TextStyle(color: Colors.white70),
+                                  ),
+                                  onTap: () {
+                                    final editorId =
+                                        _monacoDivIds[0]; // load into first editor
+
+                                    setState(() {
+                                      _currentProjectId = doc.id;
+                                      _currentProjectName = data['name'];
+
+                                      _tabContents[editorId]![TabType.html] =
+                                          data['html'] ?? '';
+                                      _tabContents[editorId]![TabType.css] =
+                                          data['css'] ?? '';
+                                      _tabContents[editorId]![TabType.js] =
+                                          data['js'] ?? '';
+                                    });
+
+                                    final currentTab =
+                                        _currentTabs[editorId] ?? TabType.html;
+                                    interop.setMonacoValue(
+                                      editorId,
+                                      _tabContents[editorId]![currentTab] ?? '',
+                                    );
+
+                                    _showSnackBar(
+                                      'Project loaded successfully',
+                                    );
+
+                                    Navigator.pop(context);
+                                  },
+                                );
+                              },
+                            );
+                          },
+                        ),
+              ),
+            ],
+          ),
+        ),
+      ),
+
       floatingActionButton: FloatingActionButton(
         onPressed: _showHistory,
         backgroundColor: Colors.blue,
