@@ -111,6 +111,10 @@ class _IDEScreenState extends State<IDEScreen> {
   // Input management
   final TextEditingController _promptController = TextEditingController();
   final FocusNode _promptFocus = FocusNode();
+  final FocusNode _fullscreenToggleFocusNode = FocusNode(
+    skipTraversal: true,
+    canRequestFocus: false,
+  );
 
   // State management
   bool _isGenerating = false;
@@ -332,6 +336,7 @@ document.addEventListener('DOMContentLoaded', function() {
   void dispose() {
     _promptController.dispose();
     _promptFocus.dispose();
+    _fullscreenToggleFocusNode.dispose();
     super.dispose();
   }
 
@@ -3929,6 +3934,8 @@ $jsContent
               child: FloatingActionButton.small(
                 heroTag: 'fullscreen-toggle',
                 onPressed: _toggleFullscreenMode,
+                focusNode: _fullscreenToggleFocusNode,
+                autofocus: false,
                 tooltip:
                     _isFullscreenMode
                         ? 'Exit Fullscreen'
