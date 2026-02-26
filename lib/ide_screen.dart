@@ -84,6 +84,7 @@ class _IDEScreenState extends State<IDEScreen> {
 
   // Keyboard positioning - now per editor
   final Map<String, KeyboardPosition?> _keyboardPositions = {};
+  final Map<String, KeyboardPosition> _lastKeyboardPositions = {};
 
   // Output expansion state - per editor
   final Map<String, bool> _outputExpanded = {};
@@ -117,6 +118,7 @@ class _IDEScreenState extends State<IDEScreen> {
 
   // History management
   bool _showHistoryPanel = false;
+  bool _showAiTextGeneration = false;
 
   // Editor selection for code generation
   int _selectedEditorIndex = 0;
@@ -258,8 +260,9 @@ document.addEventListener('DOMContentLoaded', function() {
       _autocompleteEnabledCache[id] = true;
       _isPrettifyingCache[id] = false;
 
-      // Initialize keyboard position for each editor
-      _keyboardPositions[id] = KeyboardPosition.betweenEditorOutput;
+      // Initialize keyboard hidden by default and remember preferred position
+      _keyboardPositions[id] = null;
+      _lastKeyboardPositions[id] = KeyboardPosition.betweenEditorOutput;
 
       // Initialize output expansion state (collapsed by default)
       _outputExpanded[id] = false;
@@ -1082,8 +1085,11 @@ document.addEventListener('DOMContentLoaded', function() {
     _autocompleteEnabledCache[editorId] ??= true;
     _isPrettifyingCache[editorId] ??= false;
 
-    // Initialize keyboard position if not exists
-    _keyboardPositions[editorId] ??= KeyboardPosition.betweenEditorOutput;
+    // Initialize keyboard state if not exists (hidden by default)
+    if (!_keyboardPositions.containsKey(editorId)) {
+      _keyboardPositions[editorId] = null;
+    }
+    _lastKeyboardPositions[editorId] ??= KeyboardPosition.betweenEditorOutput;
 
     // Initialize output expansion state if not exists
     _outputExpanded[editorId] ??= false;
@@ -1561,14 +1567,17 @@ document.addEventListener('DOMContentLoaded', function() {
       switch (value) {
         case 'above':
           _keyboardPositions[editorId] = KeyboardPosition.aboveEditor;
+          _lastKeyboardPositions[editorId] = KeyboardPosition.aboveEditor;
           print('Setting position to: aboveEditor for $editorId');
           break;
         case 'between':
           _keyboardPositions[editorId] = KeyboardPosition.betweenEditorOutput;
+          _lastKeyboardPositions[editorId] = KeyboardPosition.betweenEditorOutput;
           print('Setting position to: betweenEditorOutput for $editorId');
           break;
         case 'below':
           _keyboardPositions[editorId] = KeyboardPosition.belowOutput;
+          _lastKeyboardPositions[editorId] = KeyboardPosition.belowOutput;
           print('Setting position to: belowOutput for $editorId');
           break;
       }
@@ -1678,8 +1687,10 @@ document.addEventListener('DOMContentLoaded', function() {
         // Expanding - hide keyboard
         _keyboardPositions[editorId] = null;
       } else {
-        // Collapsing - show keyboard between editor and preview
-        _keyboardPositions[editorId] = KeyboardPosition.betweenEditorOutput;
+        // Collapsing - show keyboard in previously selected position
+        _keyboardPositions[editorId] =
+            _lastKeyboardPositions[editorId] ??
+            KeyboardPosition.betweenEditorOutput;
       }
     });
 
@@ -1700,6 +1711,20 @@ document.addEventListener('DOMContentLoaded', function() {
       _showOutputInPreview[editorId] =
           !(_showOutputInPreview[editorId] ?? false);
     });
+  }
+
+  void _toggleKeyboardVisibility(String editorId) {
+    setState(() {
+      final isVisible = _keyboardPositions[editorId] != null;
+      if (isVisible) {
+        _keyboardPositions[editorId] = null;
+      } else {
+        _keyboardPositions[editorId] =
+            _lastKeyboardPositions[editorId] ??
+            KeyboardPosition.betweenEditorOutput;
+      }
+    });
+    _scheduleEditorLayoutRefresh();
   }
 
   // Calculate heights accounting for keyboard toolbar and preview expansion
@@ -2619,6 +2644,25 @@ $jsContent
     });
   }
 
+  void _toggleAiTextGenerationSection() {
+    setState(() {
+      _showAiTextGeneration = !_showAiTextGeneration;
+      if (!_showAiTextGeneration) {
+        _showHistoryPanel = false;
+      }
+    });
+
+    if (!_showAiTextGeneration) {
+      _promptFocus.unfocus();
+    }
+
+    Future.delayed(const Duration(milliseconds: 120), () {
+      try {
+        interop.triggerLayoutRecalculation();
+      } catch (_) {}
+    });
+  }
+
   // Hide history panel
   void _hideHistory() {
     setState(() {
@@ -2700,6 +2744,16 @@ $jsContent
         ),
         backgroundColor: Colors.grey[900],
         actions: [
+          IconButton(
+            icon: Icon(
+              _showAiTextGeneration ? Icons.visibility_off : Icons.visibility,
+            ),
+            tooltip:
+                _showAiTextGeneration
+                    ? 'Hide AI Text Generation'
+                    : 'Show AI Text Generation',
+            onPressed: _toggleAiTextGenerationSection,
+          ),
           PopupMenuButton<int>(
             tooltip: 'Select number of editors',
             position: PopupMenuPosition.under,
@@ -2988,17 +3042,20 @@ $jsContent
         ),
       ),
 
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showHistory,
-        backgroundColor: Colors.blue,
-        tooltip: 'Show Prompt History',
-        child: const Icon(Icons.history),
-      ),
+      floatingActionButton:
+          _showAiTextGeneration
+              ? FloatingActionButton(
+                onPressed: _showHistory,
+                backgroundColor: Colors.blue,
+                tooltip: 'Show Prompt History',
+                child: const Icon(Icons.history),
+              )
+              : null,
       body: Stack(
         children: [
           Column(
             children: [
-              _buildPromptInputSection(),
+              if (_showAiTextGeneration) _buildPromptInputSection(),
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
@@ -3254,6 +3311,33 @@ $jsContent
                                                   ),
                                               child: Row(
                                                 children: [
+                                                  IconButton(
+                                                    icon: Icon(
+                                                      _keyboardPositions[_monacoDivIds[i]] ==
+                                                              null
+                                                          ? Icons.keyboard
+                                                          : Icons.keyboard_hide,
+                                                      color: Colors.white,
+                                                      size: 16,
+                                                    ),
+                                                    tooltip:
+                                                        _keyboardPositions[_monacoDivIds[i]] ==
+                                                                null
+                                                            ? 'Show Virtual Keyboard'
+                                                            : 'Hide Virtual Keyboard',
+                                                    constraints:
+                                                        const BoxConstraints(
+                                                          minWidth: 28,
+                                                          minHeight: 28,
+                                                        ),
+                                                    padding: EdgeInsets.zero,
+                                                    onPressed:
+                                                        () =>
+                                                            _toggleKeyboardVisibility(
+                                                              _monacoDivIds[i],
+                                                            ),
+                                                  ),
+                                                  const SizedBox(width: 4),
                                                   Text(
                                                     'Roll No: ${_editorRollNumbers[_monacoDivIds[i]] ?? 'N/A'}',
                                                     style: const TextStyle(
