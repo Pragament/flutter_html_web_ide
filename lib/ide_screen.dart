@@ -2689,6 +2689,29 @@ $jsContent
     }
   }
 
+  Future<void> _openLoginFromToolbar() async {
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen(openedFromIDE: true)),
+    );
+
+    if (result == true && mounted) {
+      widget.onLoginSuccess();
+      setState(() {});
+    }
+  }
+
+  void _logoutFromToolbar() {
+    SessionService.logout();
+    if (!mounted) return;
+
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (_) => false,
+    );
+  }
+
   // Add this method for error display
   Widget _buildErrorDisplay() {
     return Container(
@@ -2725,6 +2748,7 @@ $jsContent
   @override
   Widget build(BuildContext context) {
     print('Building IDE with $numberOfStudents editors'); // Debug print
+    final bool isAuthenticated = SessionService.isAuthenticated;
 
     // Trigger layout recalculation after each build to ensure platform views are properly sized
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2744,6 +2768,16 @@ $jsContent
         ),
         backgroundColor: Colors.grey[900],
         actions: [
+          if (!isAuthenticated)
+            TextButton(
+              onPressed: _openLoginFromToolbar,
+              child: const Text('Login', style: TextStyle(color: Colors.white)),
+            ),
+          if (isAuthenticated)
+            TextButton(
+              onPressed: _logoutFromToolbar,
+              child: const Text('Logout', style: TextStyle(color: Colors.white)),
+            ),
           IconButton(
             icon: Icon(
               _showAiTextGeneration ? Icons.visibility_off : Icons.visibility,
