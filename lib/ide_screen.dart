@@ -84,6 +84,7 @@ class _IDEScreenState extends State<IDEScreen> {
 
   // Keyboard positioning - now per editor
   final Map<String, KeyboardPosition?> _keyboardPositions = {};
+  final Map<String, KeyboardPosition> _lastKeyboardPositions = {};
 
   // Output expansion state - per editor
   final Map<String, bool> _outputExpanded = {};
@@ -117,6 +118,8 @@ class _IDEScreenState extends State<IDEScreen> {
 
   // History management
   bool _showHistoryPanel = false;
+  bool _showAiTextGeneration = false;
+  bool _isFullscreenMode = false;
 
   // Editor selection for code generation
   int _selectedEditorIndex = 0;
@@ -258,8 +261,9 @@ document.addEventListener('DOMContentLoaded', function() {
       _autocompleteEnabledCache[id] = true;
       _isPrettifyingCache[id] = false;
 
-      // Initialize keyboard position for each editor
-      _keyboardPositions[id] = KeyboardPosition.betweenEditorOutput;
+      // Initialize keyboard hidden by default and remember preferred position
+      _keyboardPositions[id] = null;
+      _lastKeyboardPositions[id] = KeyboardPosition.betweenEditorOutput;
 
       // Initialize output expansion state (collapsed by default)
       _outputExpanded[id] = false;
@@ -1082,8 +1086,11 @@ document.addEventListener('DOMContentLoaded', function() {
     _autocompleteEnabledCache[editorId] ??= true;
     _isPrettifyingCache[editorId] ??= false;
 
-    // Initialize keyboard position if not exists
-    _keyboardPositions[editorId] ??= KeyboardPosition.betweenEditorOutput;
+    // Initialize keyboard state if not exists (hidden by default)
+    if (!_keyboardPositions.containsKey(editorId)) {
+      _keyboardPositions[editorId] = null;
+    }
+    _lastKeyboardPositions[editorId] ??= KeyboardPosition.betweenEditorOutput;
 
     // Initialize output expansion state if not exists
     _outputExpanded[editorId] ??= false;
@@ -1561,14 +1568,17 @@ document.addEventListener('DOMContentLoaded', function() {
       switch (value) {
         case 'above':
           _keyboardPositions[editorId] = KeyboardPosition.aboveEditor;
+          _lastKeyboardPositions[editorId] = KeyboardPosition.aboveEditor;
           print('Setting position to: aboveEditor for $editorId');
           break;
         case 'between':
           _keyboardPositions[editorId] = KeyboardPosition.betweenEditorOutput;
+          _lastKeyboardPositions[editorId] = KeyboardPosition.betweenEditorOutput;
           print('Setting position to: betweenEditorOutput for $editorId');
           break;
         case 'below':
           _keyboardPositions[editorId] = KeyboardPosition.belowOutput;
+          _lastKeyboardPositions[editorId] = KeyboardPosition.belowOutput;
           print('Setting position to: belowOutput for $editorId');
           break;
       }
@@ -1678,8 +1688,10 @@ document.addEventListener('DOMContentLoaded', function() {
         // Expanding - hide keyboard
         _keyboardPositions[editorId] = null;
       } else {
-        // Collapsing - show keyboard between editor and preview
-        _keyboardPositions[editorId] = KeyboardPosition.betweenEditorOutput;
+        // Collapsing - show keyboard in previously selected position
+        _keyboardPositions[editorId] =
+            _lastKeyboardPositions[editorId] ??
+            KeyboardPosition.betweenEditorOutput;
       }
     });
 
@@ -1700,6 +1712,20 @@ document.addEventListener('DOMContentLoaded', function() {
       _showOutputInPreview[editorId] =
           !(_showOutputInPreview[editorId] ?? false);
     });
+  }
+
+  void _toggleKeyboardVisibility(String editorId) {
+    setState(() {
+      final isVisible = _keyboardPositions[editorId] != null;
+      if (isVisible) {
+        _keyboardPositions[editorId] = null;
+      } else {
+        _keyboardPositions[editorId] =
+            _lastKeyboardPositions[editorId] ??
+            KeyboardPosition.betweenEditorOutput;
+      }
+    });
+    _scheduleEditorLayoutRefresh();
   }
 
   // Calculate heights accounting for keyboard toolbar and preview expansion
@@ -2619,6 +2645,32 @@ $jsContent
     });
   }
 
+  void _toggleAiTextGenerationSection() {
+    setState(() {
+      _showAiTextGeneration = !_showAiTextGeneration;
+      if (!_showAiTextGeneration) {
+        _showHistoryPanel = false;
+      }
+    });
+
+    if (!_showAiTextGeneration) {
+      _promptFocus.unfocus();
+    }
+
+    Future.delayed(const Duration(milliseconds: 120), () {
+      try {
+        interop.triggerLayoutRecalculation();
+      } catch (_) {}
+    });
+  }
+
+  void _toggleFullscreenMode() {
+    setState(() {
+      _isFullscreenMode = !_isFullscreenMode;
+    });
+    _scheduleEditorLayoutRefresh();
+  }
+
   // Hide history panel
   void _hideHistory() {
     setState(() {
@@ -2643,6 +2695,29 @@ $jsContent
         ),
       );
     }
+  }
+
+  Future<void> _openLoginFromToolbar() async {
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen(openedFromIDE: true)),
+    );
+
+    if (result == true && mounted) {
+      widget.onLoginSuccess();
+      setState(() {});
+    }
+  }
+
+  void _logoutFromToolbar() {
+    SessionService.logout();
+    if (!mounted) return;
+
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (_) => false,
+    );
   }
 
   // Add this method for error display
@@ -2681,6 +2756,7 @@ $jsContent
   @override
   Widget build(BuildContext context) {
     print('Building IDE with $numberOfStudents editors'); // Debug print
+    final bool isAuthenticated = SessionService.isAuthenticated;
 
     // Trigger layout recalculation after each build to ensure platform views are properly sized
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2694,12 +2770,35 @@ $jsContent
     });
 
     return Scaffold(
-      appBar: AppBar(
+      appBar:
+          _isFullscreenMode
+              ? null
+              : AppBar(
         title: Text(
           'HTML Web IDE - $numberOfStudents Student${numberOfStudents == 1 ? '' : 's'}',
         ),
         backgroundColor: Colors.grey[900],
         actions: [
+          if (!isAuthenticated)
+            TextButton(
+              onPressed: _openLoginFromToolbar,
+              child: const Text('Login', style: TextStyle(color: Colors.white)),
+            ),
+          if (isAuthenticated)
+            TextButton(
+              onPressed: _logoutFromToolbar,
+              child: const Text('Logout', style: TextStyle(color: Colors.white)),
+            ),
+          IconButton(
+            icon: Icon(
+              _showAiTextGeneration ? Icons.visibility_off : Icons.visibility,
+            ),
+            tooltip:
+                _showAiTextGeneration
+                    ? 'Hide AI Text Generation'
+                    : 'Show AI Text Generation',
+            onPressed: _toggleAiTextGenerationSection,
+          ),
           PopupMenuButton<int>(
             tooltip: 'Select number of editors',
             position: PopupMenuPosition.under,
@@ -2988,17 +3087,20 @@ $jsContent
         ),
       ),
 
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showHistory,
-        backgroundColor: Colors.blue,
-        tooltip: 'Show Prompt History',
-        child: const Icon(Icons.history),
-      ),
+      floatingActionButton:
+          _showAiTextGeneration
+              ? FloatingActionButton(
+                onPressed: _showHistory,
+                backgroundColor: Colors.blue,
+                tooltip: 'Show Prompt History',
+                child: const Icon(Icons.history),
+              )
+              : null,
       body: Stack(
         children: [
           Column(
             children: [
-              _buildPromptInputSection(),
+              if (_showAiTextGeneration) _buildPromptInputSection(),
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
@@ -3054,316 +3156,357 @@ $jsContent
                                             horizontal: 4,
                                           )
                                           : null,
-                                  child: Column(
+              child: Column(
                                     key: ValueKey(
                                       'editor-column-${_monacoDivIds[i]}',
                                     ),
                                     children: [
                                       //Roll Number Header with Editor Count Dropdown
-                                      Container(
-                                        height: 40, // Make header taller
-                                        width: double.infinity,
-                                        decoration: BoxDecoration(
-                                          color: Colors.blue[700],
-                                          border: const Border(
-                                            bottom: BorderSide(
-                                              color: Colors.grey,
+                                      if (!_isFullscreenMode)
+                                        Container(
+                                          height: 40, // Make header taller
+                                          width: double.infinity,
+                                          decoration: BoxDecoration(
+                                            color: Colors.blue[700],
+                                            border: const Border(
+                                              bottom: BorderSide(
+                                                color: Colors.grey,
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                        child: Row(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            // Left side: Editor count dropdown
-                                            PopupMenuButton<int>(
-                                              tooltip:
-                                                  'Select number of editors',
-                                              position: PopupMenuPosition.under,
-                                              offset: const Offset(0, 5),
-                                              constraints: const BoxConstraints(
-                                                minWidth: 220,
-                                                maxWidth: 220,
-                                              ),
-                                              onSelected: (value) async {
-                                                print(
-                                                  'Editor count changed from $numberOfStudents to $value',
-                                                );
-
-                                                // Save current state before changing
-                                                await _saveCurrentEditorStates();
-
-                                                // Immediately show loading state and cleanup editors to prevent flashing
-                                                setState(() {
-                                                  _monacoInitialized = false;
-                                                  _isInitializingMonaco = true;
-                                                  numberOfStudents = value;
-                                                  // Reset selected editor index if it's out of range
-                                                  if (_selectedEditorIndex >=
-                                                      numberOfStudents) {
-                                                    _selectedEditorIndex = 0;
-                                                  }
-                                                  // Mark that editors need reinitialization after widget rebuild
-                                                  _editorsNeedReinitialization =
-                                                      true;
-                                                });
-
-                                                print(
-                                                  'numberOfStudents updated to: $numberOfStudents',
-                                                );
-
-                                                // Immediately cleanup existing editors to prevent visual glitch
-                                                await _cleanupEditors();
-
-                                                // Ensure all editor states are initialized for the new count
-                                                _ensureAllEditorStatesInitialized();
-                                                _assignRollNumbers();
-
-                                                // Wait for widget rebuild to complete, then reinitialize editors
-                                                WidgetsBinding.instance.addPostFrameCallback((
-                                                  _,
-                                                ) {
-                                                  Future.delayed(
-                                                    const Duration(
-                                                      milliseconds: 500,
+                                          child: Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              // Left side: Editor count dropdown
+                                              PopupMenuButton<int>(
+                                                tooltip:
+                                                    'Select number of editors',
+                                                position:
+                                                    PopupMenuPosition.under,
+                                                offset: const Offset(0, 5),
+                                                constraints:
+                                                    const BoxConstraints(
+                                                      minWidth: 220,
+                                                      maxWidth: 220,
                                                     ),
-                                                    () async {
-                                                      await _reinitializeEditors();
-                                                      print(
-                                                        'Editor switch completed: $numberOfStudents editors active',
-                                                      );
-
-                                                      // Trigger layout recalculation after editor count change
-                                                      await Future.delayed(
-                                                        const Duration(
-                                                          milliseconds: 300,
-                                                        ),
-                                                      );
-                                                      try {
-                                                        await interop
-                                                            .triggerLayoutRecalculation();
-                                                      } catch (e) {
-                                                        print(
-                                                          'Failed to trigger layout recalculation after editor switch: $e',
-                                                        );
-                                                      }
-                                                    },
+                                                onSelected: (value) async {
+                                                  print(
+                                                    'Editor count changed from $numberOfStudents to $value',
                                                   );
-                                                });
-                                              },
-                                              itemBuilder:
-                                                  (context) => [
-                                                    const PopupMenuItem<int>(
-                                                      value: 0,
-                                                      enabled: false,
-                                                      child: Text(
-                                                        'Select Number of Editors',
-                                                        style: TextStyle(
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                          fontSize: 14,
+
+                                                  // Save current state before changing
+                                                  await _saveCurrentEditorStates();
+
+                                                  // Immediately show loading state and cleanup editors to prevent flashing
+                                                  setState(() {
+                                                    _monacoInitialized = false;
+                                                    _isInitializingMonaco =
+                                                        true;
+                                                    numberOfStudents = value;
+                                                    // Reset selected editor index if it's out of range
+                                                    if (_selectedEditorIndex >=
+                                                        numberOfStudents) {
+                                                      _selectedEditorIndex = 0;
+                                                    }
+                                                    // Mark that editors need reinitialization after widget rebuild
+                                                    _editorsNeedReinitialization =
+                                                        true;
+                                                  });
+
+                                                  print(
+                                                    'numberOfStudents updated to: $numberOfStudents',
+                                                  );
+
+                                                  // Immediately cleanup existing editors to prevent visual glitch
+                                                  await _cleanupEditors();
+
+                                                  // Ensure all editor states are initialized for the new count
+                                                  _ensureAllEditorStatesInitialized();
+                                                  _assignRollNumbers();
+
+                                                  // Wait for widget rebuild to complete, then reinitialize editors
+                                                  WidgetsBinding.instance
+                                                      .addPostFrameCallback((_) {
+                                                        Future.delayed(
+                                                          const Duration(
+                                                            milliseconds: 500,
+                                                          ),
+                                                          () async {
+                                                            await _reinitializeEditors();
+                                                            print(
+                                                              'Editor switch completed: $numberOfStudents editors active',
+                                                            );
+
+                                                            // Trigger layout recalculation after editor count change
+                                                            await Future.delayed(
+                                                              const Duration(
+                                                                milliseconds:
+                                                                    300,
+                                                              ),
+                                                            );
+                                                            try {
+                                                              await interop
+                                                                  .triggerLayoutRecalculation();
+                                                            } catch (e) {
+                                                              print(
+                                                                'Failed to trigger layout recalculation after editor switch: $e',
+                                                              );
+                                                            }
+                                                          },
+                                                        );
+                                                      });
+                                                },
+                                                itemBuilder:
+                                                    (context) => [
+                                                      const PopupMenuItem<int>(
+                                                        value: 0,
+                                                        enabled: false,
+                                                        child: Text(
+                                                          'Select Number of Editors',
+                                                          style: TextStyle(
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                            fontSize: 14,
+                                                          ),
                                                         ),
                                                       ),
-                                                    ),
-                                                    const PopupMenuDivider(),
-                                                    for (int e = 1; e <= 4; e++)
-                                                      PopupMenuItem<int>(
-                                                        value: e,
-                                                        child: Row(
-                                                          mainAxisSize:
-                                                              MainAxisSize.max,
-                                                          children: [
-                                                            if (numberOfStudents ==
-                                                                e) ...[
-                                                              const Icon(
-                                                                Icons.check,
-                                                                size: 18,
-                                                                color:
-                                                                    Colors.blue,
-                                                              ),
-                                                              const SizedBox(
-                                                                width: 8,
-                                                              ),
-                                                            ] else ...[
-                                                              const SizedBox(
-                                                                width: 26,
+                                                      const PopupMenuDivider(),
+                                                      for (
+                                                        int e = 1;
+                                                        e <= 4;
+                                                        e++
+                                                      )
+                                                        PopupMenuItem<int>(
+                                                          value: e,
+                                                          child: Row(
+                                                            mainAxisSize:
+                                                                MainAxisSize
+                                                                    .max,
+                                                            children: [
+                                                              if (numberOfStudents ==
+                                                                  e) ...[
+                                                                const Icon(
+                                                                  Icons.check,
+                                                                  size: 18,
+                                                                  color:
+                                                                      Colors
+                                                                          .blue,
+                                                                ),
+                                                                const SizedBox(
+                                                                  width: 8,
+                                                                ),
+                                                              ] else ...[
+                                                                const SizedBox(
+                                                                  width: 26,
+                                                                ),
+                                                              ],
+                                                              Text(
+                                                                'Editor $e',
+                                                                style: TextStyle(
+                                                                  fontSize: 14,
+                                                                  color:
+                                                                      numberOfStudents ==
+                                                                              e
+                                                                          ? Colors
+                                                                              .blue
+                                                                          : Colors
+                                                                              .black87,
+                                                                  fontWeight:
+                                                                      numberOfStudents ==
+                                                                              e
+                                                                          ? FontWeight
+                                                                              .w600
+                                                                          : FontWeight
+                                                                              .normal,
+                                                                ),
                                                               ),
                                                             ],
-                                                            Text(
-                                                              'Editor $e',
-                                                              style: TextStyle(
-                                                                fontSize: 14,
-                                                                color:
-                                                                    numberOfStudents ==
-                                                                            e
-                                                                        ? Colors
-                                                                            .blue
-                                                                        : Colors
-                                                                            .black87,
-                                                                fontWeight:
-                                                                    numberOfStudents ==
-                                                                            e
-                                                                        ? FontWeight
-                                                                            .w600
-                                                                        : FontWeight
-                                                                            .normal,
-                                                              ),
-                                                            ),
-                                                          ],
+                                                          ),
                                                         ),
-                                                      ),
-                                                  ],
-                                              child: Center(
-                                                child: Padding(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 8.0,
-                                                      ),
-                                                  child: Row(
-                                                    mainAxisSize:
-                                                        MainAxisSize.min,
-                                                    mainAxisAlignment:
-                                                        MainAxisAlignment
-                                                            .center,
-                                                    children: [
-                                                      Text(
-                                                        'Editor ${i + 1}',
-                                                        style: const TextStyle(
-                                                          color: Colors.white,
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                          fontSize: 16,
-                                                        ),
-                                                      ),
-                                                      const SizedBox(width: 4),
-                                                      const Icon(
-                                                        Icons.arrow_drop_down,
-                                                        color: Colors.white,
-                                                        size: 18,
-                                                      ),
                                                     ],
+                                                child: Center(
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 8.0,
+                                                        ),
+                                                    child: Row(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      mainAxisAlignment:
+                                                          MainAxisAlignment
+                                                              .center,
+                                                      children: [
+                                                        Text(
+                                                          'Editor ${i + 1}',
+                                                          style: const TextStyle(
+                                                            color: Colors.white,
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                            fontSize: 16,
+                                                          ),
+                                                        ),
+                                                        const SizedBox(
+                                                          width: 4,
+                                                        ),
+                                                        const Icon(
+                                                          Icons.arrow_drop_down,
+                                                          color: Colors.white,
+                                                          size: 18,
+                                                        ),
+                                                      ],
+                                                    ),
                                                   ),
                                                 ),
                                               ),
-                                            ),
-                                            // Right side: Roll number and refresh button
-                                            Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 8.0,
-                                                  ),
-                                              child: Row(
-                                                children: [
-                                                  Text(
-                                                    'Roll No: ${_editorRollNumbers[_monacoDivIds[i]] ?? 'N/A'}',
-                                                    style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      fontSize: 14,
+                                              // Right side: Roll number and refresh button
+                                              Padding(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 8.0,
                                                     ),
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  // Refresh button right beside the roll number
-                                                  GestureDetector(
-                                                    onTap:
-                                                        () =>
-                                                            _regenerateRollNumber(
-                                                              _monacoDivIds[i],
-                                                            ),
-                                                    child: Container(
-                                                      padding:
-                                                          const EdgeInsets.all(
-                                                            2,
-                                                          ),
-                                                      decoration: BoxDecoration(
-                                                        color: Colors.white
-                                                            .withOpacity(0.2),
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              4,
-                                                            ),
-                                                      ),
-                                                      child: const Icon(
-                                                        Icons.refresh,
+                                                child: Row(
+                                                  children: [
+                                                    IconButton(
+                                                      icon: Icon(
+                                                        _keyboardPositions[_monacoDivIds[i]] ==
+                                                                null
+                                                            ? Icons.keyboard
+                                                            : Icons
+                                                                .keyboard_hide,
                                                         color: Colors.white,
-                                                        size: 14,
+                                                        size: 16,
+                                                      ),
+                                                      tooltip:
+                                                          _keyboardPositions[_monacoDivIds[i]] ==
+                                                                  null
+                                                              ? 'Show Virtual Keyboard'
+                                                              : 'Hide Virtual Keyboard',
+                                                      constraints:
+                                                          const BoxConstraints(
+                                                            minWidth: 28,
+                                                            minHeight: 28,
+                                                          ),
+                                                      padding: EdgeInsets.zero,
+                                                      onPressed:
+                                                          () => _toggleKeyboardVisibility(
+                                                            _monacoDivIds[i],
+                                                          ),
+                                                    ),
+                                                    const SizedBox(width: 4),
+                                                    Text(
+                                                      'Roll No: ${_editorRollNumbers[_monacoDivIds[i]] ?? 'N/A'}',
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                        fontSize: 14,
                                                       ),
                                                     ),
-                                                  ),
-                                                ],
+                                                    const SizedBox(width: 8),
+                                                    // Refresh button right beside the roll number
+                                                    GestureDetector(
+                                                      onTap:
+                                                          () => _regenerateRollNumber(
+                                                            _monacoDivIds[i],
+                                                          ),
+                                                      child: Container(
+                                                        padding:
+                                                            const EdgeInsets.all(
+                                                              2,
+                                                            ),
+                                                        decoration: BoxDecoration(
+                                                          color: Colors.white
+                                                              .withOpacity(
+                                                                0.2,
+                                                              ),
+                                                          borderRadius:
+                                                              BorderRadius.circular(
+                                                                4,
+                                                              ),
+                                                        ),
+                                                        child: const Icon(
+                                                          Icons.refresh,
+                                                          color: Colors.white,
+                                                          size: 14,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
                                               ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      //TabBar
-                                      Container(
-                                        height: 45,
-                                        decoration: BoxDecoration(
-                                          color: Colors.grey[800],
-                                          border: const Border(
-                                            bottom: BorderSide(
-                                              color: Colors.grey,
-                                            ),
+                                            ],
                                           ),
                                         ),
-                                        child: Row(
-                                          children:
-                                              TabType.values.map((tab) {
-                                                final isActive =
-                                                    _currentTabs[_monacoDivIds[i]] ==
-                                                    tab;
-                                                return Expanded(
-                                                  child: GestureDetector(
-                                                    onTap:
-                                                        () => _switchTab(
-                                                          _monacoDivIds[i],
-                                                          tab,
-                                                        ),
-                                                    child: Container(
-                                                      decoration: BoxDecoration(
-                                                        color:
-                                                            isActive
-                                                                ? Colors
-                                                                    .blue[600]
-                                                                : Colors
-                                                                    .transparent,
-                                                        border: Border(
-                                                          right: BorderSide(
-                                                            color:
-                                                                Colors
-                                                                    .grey[600]!,
+                                      //TabBar
+                                      if (!_isFullscreenMode)
+                                        Container(
+                                          height: 45,
+                                          decoration: BoxDecoration(
+                                            color: Colors.grey[800],
+                                            border: const Border(
+                                              bottom: BorderSide(
+                                                color: Colors.grey,
+                                              ),
+                                            ),
+                                          ),
+                                          child: Row(
+                                            children:
+                                                TabType.values.map((tab) {
+                                                  final isActive =
+                                                      _currentTabs[_monacoDivIds[i]] ==
+                                                      tab;
+                                                  return Expanded(
+                                                    child: GestureDetector(
+                                                      onTap:
+                                                          () => _switchTab(
+                                                            _monacoDivIds[i],
+                                                            tab,
+                                                          ),
+                                                      child: Container(
+                                                        decoration: BoxDecoration(
+                                                          color:
+                                                              isActive
+                                                                  ? Colors
+                                                                      .blue[600]
+                                                                  : Colors
+                                                                      .transparent,
+                                                          border: Border(
+                                                            right: BorderSide(
+                                                              color:
+                                                                  Colors
+                                                                      .grey[600]!,
+                                                            ),
                                                           ),
                                                         ),
-                                                      ),
-                                                      child: Center(
-                                                        child: Text(
-                                                          tab.name
-                                                              .toUpperCase(),
-                                                          style: TextStyle(
-                                                            color:
-                                                                isActive
-                                                                    ? Colors
-                                                                        .white
-                                                                    : Colors
-                                                                        .grey[300],
-                                                            fontWeight:
-                                                                isActive
-                                                                    ? FontWeight
-                                                                        .bold
-                                                                    : FontWeight
-                                                                        .normal,
-                                                            fontSize: 12,
+                                                        child: Center(
+                                                          child: Text(
+                                                            tab.name
+                                                                .toUpperCase(),
+                                                            style: TextStyle(
+                                                              color:
+                                                                  isActive
+                                                                      ? Colors
+                                                                          .white
+                                                                      : Colors
+                                                                          .grey[300],
+                                                              fontWeight:
+                                                                  isActive
+                                                                      ? FontWeight
+                                                                          .bold
+                                                                      : FontWeight
+                                                                          .normal,
+                                                              fontSize: 12,
+                                                            ),
                                                           ),
                                                         ),
                                                       ),
                                                     ),
-                                                  ),
-                                                );
-                                              }).toList(),
+                                                  );
+                                                }).toList(),
+                                          ),
                                         ),
-                                      ),
                                       // Keyboard position handling (unified for single & multi editor modes):
                                       // Reserve three potential slots (above / between / below). Each slot keeps a placeholder
                                       // when inactive to preserve the index ordering of the HtmlElementView (Monaco) widget in the
@@ -3448,22 +3591,25 @@ $jsContent
                                             child: Column(
                                               children: [
                                                 // Preview/Output header with controls
-                                                Container(
-                                                  height: 50,
-                                                  decoration: BoxDecoration(
-                                                    color:
-                                                        _showOutputInPreview[_monacoDivIds[i]] ==
-                                                                true
-                                                            ? Colors.grey[800]
-                                                            : Colors.green[700],
-                                                    border: const Border(
-                                                      bottom: BorderSide(
-                                                        color: Colors.grey,
+                                                if (!_isFullscreenMode)
+                                                  Container(
+                                                    height: 50,
+                                                    decoration: BoxDecoration(
+                                                      color:
+                                                          _showOutputInPreview[_monacoDivIds[i]] ==
+                                                                  true
+                                                              ? Colors
+                                                                  .grey[800]
+                                                              : Colors
+                                                                  .green[700],
+                                                      border: const Border(
+                                                        bottom: BorderSide(
+                                                          color: Colors.grey,
+                                                        ),
                                                       ),
                                                     ),
-                                                  ),
-                                                  child: Row(
-                                                    children: [
+                                                    child: Row(
+                                                      children: [
                                                       const SizedBox(width: 8),
                                                       Icon(
                                                         _showOutputInPreview[_monacoDivIds[i]] ==
@@ -3680,9 +3826,9 @@ $jsContent
                                                         ),
                                                       ],
                                                       const SizedBox(width: 8),
-                                                    ],
+                                                      ],
+                                                    ),
                                                   ),
-                                                ),
 
                                                 // Content area - shows either preview or output based on toggle
                                                 Expanded(
@@ -3775,6 +3921,27 @@ $jsContent
                 ),
               ),
             ],
+          ),
+          Positioned(
+            left: 12,
+            top: 12,
+            child: SafeArea(
+              child: FloatingActionButton.small(
+                heroTag: 'fullscreen-toggle',
+                onPressed: _toggleFullscreenMode,
+                tooltip:
+                    _isFullscreenMode
+                        ? 'Exit Fullscreen'
+                        : 'Enter Fullscreen',
+                backgroundColor: Colors.black87,
+                child: Icon(
+                  _isFullscreenMode
+                      ? Icons.fullscreen_exit
+                      : Icons.fullscreen,
+                  color: Colors.white,
+                ),
+              ),
+            ),
           ),
           // History panel overlay - moved outside Column and directly inside Stack
           if (_showHistoryPanel)

@@ -3,6 +3,9 @@ let monacoEditors = {}; // Object to store editor instances
 let pyodide;
 let monacoLoaded = false;
 let monacoLoadPromise = null;
+const isMobileDevice = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+  navigator.userAgent
+);
 
 // Helper function to clean common invalid characters from code
 function sanitizeCode(code) {
@@ -386,9 +389,9 @@ window.monacoInterop = {
         }
       }, 100);
 
-      // Prevent system keyboard on mobile devices
+      // Prevent system keyboard only on mobile touch devices
       const editorDomNode = editor.getDomNode();
-      if (editorDomNode) {
+      if (isMobileDevice && editorDomNode) {
         // Prevent focus events that trigger system keyboard
         editorDomNode.addEventListener('touchstart', (e) => {
           e.preventDefault();
@@ -840,7 +843,7 @@ window.disableSystemKeyboard = function() {
 };
 
 // Auto-disable on mobile devices
-if (/Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+if (isMobileDevice) {
   window.disableSystemKeyboard();
 }
 
