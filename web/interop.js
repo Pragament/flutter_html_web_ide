@@ -32,6 +32,134 @@ function loadMonaco() {
 
 console.log('Monaco Interop JavaScript loaded');
 
+// PWA install/open bridge for Windows Chrome.
+window.pwaInstallInterop = (() => {
+  const installedStorageKey = 'flutter_html_web_ide_pwa_installed';
+  let deferredInstallPrompt = null;
+  let statusListener = null;
+  let relatedAppInstalled = false;
+
+  function isWindowsChrome() {
+    const ua = navigator.userAgent || '';
+    const vendor = navigator.vendor || '';
+    const isWindows = /Windows/i.test(ua);
+    const isChrome = /Chrome/i.test(ua) && /Google Inc/i.test(vendor);
+    const isEdge = /Edg/i.test(ua);
+    const isOpera = /OPR|Opera/i.test(ua);
+    return isWindows && isChrome && !isEdge && !isOpera;
+  }
+
+  function isStandaloneMode() {
+    return window.matchMedia('(display-mode: standalone)').matches ||
+      window.matchMedia('(display-mode: window-controls-overlay)').matches ||
+      navigator.standalone === true;
+  }
+
+  function isInstalled() {
+    if (isStandaloneMode()) {
+      return true;
+    }
+
+    try {
+      return relatedAppInstalled || window.localStorage.getItem(installedStorageKey) === 'true';
+    } catch (_) {
+      return relatedAppInstalled;
+    }
+  }
+
+  function isInstallAvailable() {
+    return isWindowsChrome() && deferredInstallPrompt !== null && !isStandaloneMode();
+  }
+
+  function notifyStatusChanged() {
+    if (typeof statusListener === 'function') {
+      statusListener();
+    }
+  }
+
+  async function refreshInstalledStatus() {
+    if (typeof navigator.getInstalledRelatedApps !== 'function' || !isWindowsChrome()) {
+      relatedAppInstalled = false;
+      notifyStatusChanged();
+      return;
+    }
+
+    try {
+      const relatedApps = await navigator.getInstalledRelatedApps();
+      relatedAppInstalled = relatedApps.some((app) => app.platform === 'webapp');
+    } catch (_) {
+      relatedAppInstalled = false;
+    }
+
+    notifyStatusChanged();
+  }
+
+  window.addEventListener('beforeinstallprompt', (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    notifyStatusChanged();
+  });
+
+  window.addEventListener('appinstalled', () => {
+    deferredInstallPrompt = null;
+    try {
+      window.localStorage.setItem(installedStorageKey, 'true');
+    } catch (_) {}
+    refreshInstalledStatus();
+  });
+
+  const displayModeQuery = window.matchMedia('(display-mode: standalone)');
+  if (typeof displayModeQuery.addEventListener === 'function') {
+    displayModeQuery.addEventListener('change', notifyStatusChanged);
+  }
+
+  window.addEventListener('focus', refreshInstalledStatus);
+  refreshInstalledStatus();
+
+  return {
+    isSupported: () => isWindowsChrome(),
+    isInstallAvailable: () => isInstallAvailable(),
+    isInstalled: () => isInstalled(),
+    isStandalone: () => isStandaloneMode(),
+    setStatusListener: (listener) => {
+      statusListener = listener;
+      notifyStatusChanged();
+    },
+    clearStatusListener: () => {
+      statusListener = null;
+    },
+    promptInstall: async () => {
+      if (!isInstallAvailable()) {
+        return 'unavailable';
+      }
+
+      const promptEvent = deferredInstallPrompt;
+      deferredInstallPrompt = null;
+      await promptEvent.prompt();
+      const choice = await promptEvent.userChoice;
+
+      if (choice && choice.outcome === 'accepted') {
+        try {
+          window.localStorage.setItem(installedStorageKey, 'true');
+        } catch (_) {}
+      }
+
+      notifyStatusChanged();
+      return choice?.outcome || 'dismissed';
+    },
+    openApp: () => {
+      if (!isInstalled()) {
+        return false;
+      }
+
+      const launchUrl = new URL(window.location.href);
+      launchUrl.searchParams.set('source', 'pwa-open');
+      window.open(launchUrl.toString(), '_blank');
+      return true;
+    },
+  };
+})();
+
 // Web development suggestions for HTML, CSS, and JavaScript
 const htmlSuggestions = [
   // HTML Tags

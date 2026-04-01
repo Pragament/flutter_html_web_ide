@@ -208,3 +208,50 @@ Future<void> triggerLayoutRecalculation() async {
     print('Failed to trigger layout recalculation: $e');
   }
 }
+
+// PWA install/open bindings
+@JS('pwaInstallInterop.isSupported')
+external JSBoolean _isPwaInstallSupported();
+
+bool isPwaInstallSupported() => _isPwaInstallSupported().toDart;
+
+@JS('pwaInstallInterop.isInstallAvailable')
+external JSBoolean _isPwaInstallAvailable();
+
+bool isPwaInstallAvailable() => _isPwaInstallAvailable().toDart;
+
+@JS('pwaInstallInterop.isInstalled')
+external JSBoolean _isPwaInstalled();
+
+bool isPwaInstalled() => _isPwaInstalled().toDart;
+
+@JS('pwaInstallInterop.isStandalone')
+external JSBoolean _isRunningAsPwa();
+
+bool isRunningAsPwa() => _isRunningAsPwa().toDart;
+
+@JS('pwaInstallInterop.promptInstall')
+external JSPromise _promptPwaInstall();
+
+Future<String> promptPwaInstall() {
+  return _promptPwaInstall().toDart.then((value) => (value as JSString).toDart);
+}
+
+@JS('pwaInstallInterop.openApp')
+external JSBoolean _openPwaApp();
+
+bool openPwaApp() => _openPwaApp().toDart;
+
+@JS('pwaInstallInterop.setStatusListener')
+external void _setPwaStatusListener(JSFunction listener);
+
+void setPwaStatusListener(void Function() listener) {
+  _setPwaStatusListener(listener.toJS);
+}
+
+@JS('pwaInstallInterop.clearStatusListener')
+external void _clearPwaStatusListener();
+
+void clearPwaStatusListener() {
+  _clearPwaStatusListener();
+}

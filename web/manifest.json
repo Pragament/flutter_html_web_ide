@@ -1,13 +1,22 @@
 {
-    "name": "python_web_ide",
-    "short_name": "python_web_ide",
+    "name": "HTML Web IDE",
+    "short_name": "HTML IDE",
+    "id": "./",
     "start_url": ".",
+    "scope": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#1E1E1E",
+    "theme_color": "#1E1E1E",
+    "description": "A Flutter-powered HTML, CSS, and JavaScript web IDE.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
+    "related_applications": [
+        {
+            "platform": "webapp",
+            "url": "manifest.json",
+            "id": "./"
+        }
+    ],
     "icons": [
         {
             "src": "icons/Icon-192.png",
