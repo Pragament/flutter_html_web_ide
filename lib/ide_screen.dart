@@ -119,6 +119,8 @@ class _IDEScreenState extends State<IDEScreen> {
   // State management
   bool _isGenerating = false;
   String? _errorMessage;
+  bool _showPwaInstallAction = false;
+  bool _isPwaInstalled = false;
 
   // History management
   bool _showHistoryPanel = false;
@@ -131,6 +133,7 @@ class _IDEScreenState extends State<IDEScreen> {
   @override
   void initState() {
     super.initState();
+    _initializePwaInstallAction();
 
     // Initialize state only for currently active editors (default = 1).
     // Remaining editor slots are lazily completed when user increases count.
@@ -334,10 +337,74 @@ document.addEventListener('DOMContentLoaded', function() {
 
   @override
   void dispose() {
+    interop.clearPwaStatusListener();
     _promptController.dispose();
     _promptFocus.dispose();
     _fullscreenToggleFocusNode.dispose();
     super.dispose();
+  }
+
+  void _initializePwaInstallAction() {
+    try {
+      interop.setPwaStatusListener(_refreshPwaInstallAction);
+      _refreshPwaInstallAction();
+    } catch (e) {
+      print('Failed to initialize PWA install action: $e');
+    }
+  }
+
+  void _refreshPwaInstallAction() {
+    if (!mounted) return;
+
+    try {
+      final isSupported = interop.isPwaInstallSupported();
+      final isStandalone = interop.isRunningAsPwa();
+      final isInstalled = interop.isPwaInstalled();
+      final canInstall = interop.isPwaInstallAvailable();
+      final shouldShow = isSupported && !isStandalone && (canInstall || isInstalled);
+
+      if (_showPwaInstallAction == shouldShow && _isPwaInstalled == isInstalled) {
+        return;
+      }
+
+      setState(() {
+        _showPwaInstallAction = shouldShow;
+        _isPwaInstalled = isInstalled;
+      });
+    } catch (e) {
+      print('Failed to refresh PWA install action: $e');
+    }
+  }
+
+  Future<void> _handlePwaInstallAction() async {
+    if (_isPwaInstalled) {
+      final opened = interop.openPwaApp();
+      _showSnackBar(
+        opened
+            ? 'Attempting to open the installed app...'
+            : 'Open the app from your Start menu or Chrome Apps.',
+      );
+      return;
+    }
+
+    try {
+      final result = await interop.promptPwaInstall();
+      _refreshPwaInstallAction();
+
+      switch (result) {
+        case 'accepted':
+          _showSnackBar('App installed. You can now open it like a desktop app.');
+          break;
+        case 'dismissed':
+          _showSnackBar('Install prompt dismissed.');
+          break;
+        default:
+          _showSnackBar('Install is available only in Chrome on Windows when the app is eligible.');
+      }
+    } catch (e) {
+      _showSnackBar('Unable to show the install prompt right now.');
+      print('Failed to handle PWA install action: $e');
+    }
   }
 
   @override
@@ -2784,6 +2851,18 @@ $jsContent
         ),
         backgroundColor: Colors.grey[900],
         actions: [
+          if (_showPwaInstallAction)
+            TextButton.icon(
+              onPressed: _handlePwaInstallAction,
+              icon: Icon(
+                _isPwaInstalled ? Icons.open_in_new : Icons.download_for_offline,
+                color: Colors.white,
+              ),
+              label: Text(
+                _isPwaInstalled ? 'Open in app' : 'Install app',
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
           if (!isAuthenticated)
             TextButton(
               onPressed: _openLoginFromToolbar,
